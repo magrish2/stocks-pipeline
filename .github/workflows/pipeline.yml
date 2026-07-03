@@ -2,7 +2,7 @@ name: Stock pipeline
 
 on:
   schedule:
-    - cron: "*/15 * * * *"     # cada ~15 min (GitHub puede demorarlo un poco)
+    - cron: "*/5 * * * *"      # cada 5 min (mínimo de GitHub; puede demorarse algo)
   workflow_dispatch: {}          # botón para correrlo a mano
 
 concurrency:
