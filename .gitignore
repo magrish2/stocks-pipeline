@@ -1,0 +1,24 @@
+# Datos y binarios (no van al repo)
+*.xlsx
+*.xlsb
+~$*
+.cache_img/
+_img_cache/
+_registro/
+.venv/
+__pycache__/
+*.pyc
+tools/
+F26/
+F26.zip
+*.log
+
+# Secretos (se cargan como GitHub Secrets, nunca al repo)
+pipeline/credentials.json
+pipeline/token.json
+meli_config.json
+meli_tokens.json
+
+# Estado local
+pipeline/.watch.lock
+meli_cache.json

@@ -1,0 +1,35 @@
+name: Stock pipeline
+
+on:
+  schedule:
+    - cron: "*/15 * * * *"     # cada ~15 min (GitHub puede demorarlo un poco)
+  workflow_dispatch: {}          # botón para correrlo a mano
+
+concurrency:
+  group: stock-pipeline
+  cancel-in-progress: false      # no pisar una corrida en curso
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - run: pip install -r requirements.txt
+
+      - name: Escribir credenciales de Google (desde secrets)
+        env:
+          GOOGLE_CREDENTIALS: ${{ secrets.GOOGLE_CREDENTIALS }}
+          GOOGLE_TOKEN: ${{ secrets.GOOGLE_TOKEN }}
+        run: |
+          printf '%s' "$GOOGLE_CREDENTIALS" > pipeline/credentials.json
+          printf '%s' "$GOOGLE_TOKEN" > pipeline/token.json
+
+      - name: Correr pipeline
+        run: python pipeline/run_drive.py
