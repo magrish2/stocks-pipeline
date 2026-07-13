@@ -2,6 +2,7 @@
 """Motor de normalización: envuelve normalizar_stock para Reebok y Kappa,
 con soporte de sync de maestro (saltear sin stock + arrastrar Pedido)."""
 import os
+import re
 import sys
 from types import SimpleNamespace
 
@@ -13,11 +14,41 @@ REEBOK_CDN = "https://reebok.com.ar/cdn/shop/files/{name}?width=1024"
 KAPPA_CDN = "https://www.kappastore.com.ar/cdn/shop/files/{name}?width=1024"
 
 
+def _first_sku(path):
+    """Primer SKU con dato del archivo (para detectar marca por prefijo)."""
+    try:
+        for sh in ns.list_sheets(path):
+            rows = ns.read_sheet_rows(path, sh)
+            h = ns.find_header_index(rows)
+            if h is None:
+                continue
+            cmap = ns.col_map(rows[h])
+            si = ns.pick(cmap, "sku", "número de artículo", "numero de articulo")
+            if si is None:
+                continue
+            for r in rows[h + 1:]:
+                if si < len(r) and r[si]:
+                    return str(r[si]).strip().upper()
+    except Exception:
+        pass
+    return ""
+
+
 def detect_brand(path):
     n = os.path.basename(path).lower()
     if "kappa" in n:
         return "kappa"
     if "croc" in n:
+        return "crocs"
+    if "reebok" in n or "rbk" in n:
+        return "reebok"
+    # No está en el nombre (ej. stocks de clubes Kappa): mirar el prefijo del SKU.
+    sku = _first_sku(path)
+    if sku.startswith("RBK"):
+        return "reebok"
+    if re.match(r"^K\d", sku):
+        return "kappa"
+    if re.match(r"^C\d", sku):
         return "crocs"
     return "reebok"
 

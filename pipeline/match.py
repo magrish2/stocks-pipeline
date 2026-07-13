@@ -40,14 +40,33 @@ def key_for(filename):
         tipo = "promo_50"
     elif "temp" in n and "anterior" in n:
         tipo = "promo_tempant"
+    elif "promo" in n and "calzado" in n:
+        tipo = "promo_calzado"
+    elif "promo" in n and "indumentaria" in n:
+        tipo = "promo_indumentaria"
     elif "promo" in n:
         tipo = "promo"
     elif "inmediato" in n:
         tipo = "inmediato"
     else:
+        tipo = None
+
+    # Marca desconocida en el nombre (ej. clubes: Atl. Tucumán, Huracán, Tigre):
+    # usamos un slug del nombre para que cada producto tenga su propio maestro.
+    if marca == "otro":
+        tipo = _slug(n)
+    elif tipo is None:
         tipo = "general"
 
     return f"{marca}_{tipo}"
+
+
+def _slug(n):
+    """Nombre distintivo a partir del filename (saca 'stock', fechas, símbolos)."""
+    s = re.sub(r"\bstock\b", " ", n)
+    s = re.sub(r"\d{1,2}[-/.]\d{1,2}([-/.]\d{2,4})?", " ", s)   # fechas
+    s = re.sub(r"[^a-z0-9]+", "-", s).strip("-")
+    return s or "general"
 
 
 if __name__ == "__main__":
