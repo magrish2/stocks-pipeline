@@ -795,9 +795,11 @@ def normalize_sheet(ws_out, rows, token, cache, session, opts, orig_images=None)
 
     i_sku = pick(cmap, "Número de artículo", "Numero de articulo", "SKU")
     i_desc = pick(cmap, "Descripción del artículo", "Descripcion del articulo",
-                  "Descripción", "Descripcion")     # Crocs usa "Descripción" a secas
+                  "Descripción", "Descripcion",       # Crocs usa "Descripción" a secas
+                  "ARTICLE NAME", "Nombre modelo",     # planillas de clubes Kappa
+                  "Nombre del modelo", "Nombre del artículo")
     i_sintalle = pick(cmap, "Descripción sin talle", "Descripcion sin talle")
-    i_modelo = pick(cmap, "Modelo Color", "Modelo-Color", "Modelo")
+    i_modelo = pick(cmap, "Modelo Color", "Modelo-Color", "Modelo/Color", "Modelo")
     i_disp = pick(cmap, "DISPONIBLE (inmediato)", "Disponible (inmediato)")
     if i_disp is None:
         # El nombre varía por archivo: "DISPONIBLE", "DISPONIBLE (entrega 15
@@ -817,7 +819,7 @@ def normalize_sheet(ws_out, rows, token, cache, session, opts, orig_images=None)
                    "Mayorista Primera PP", "Módulo Mayorista")   # Crocs: módulo
     i_pub = pick(cmap, "Público", "Publico", "Individual Público",
                  "Individual Publico")              # Crocs
-    i_genero = pick(cmap, "GÉNERO", "Género", "Genero")
+    i_genero = pick(cmap, "GÉNERO", "Género", "Genero", "Gender")
 
     if i_sku is None or i_desc is None:
         print("  [!] Faltan columnas mínimas (SKU/Descripción); salteo la hoja.")

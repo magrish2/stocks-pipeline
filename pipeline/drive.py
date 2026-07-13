@@ -61,6 +61,20 @@ def list_files(svc, folder_id):
     return out
 
 
+def get_or_create_folder(svc, parent_id, name):
+    """Devuelve el id de la subcarpeta `name` dentro de `parent_id` (la crea si no está)."""
+    q = (f"'{parent_id}' in parents and name = '{name}' and "
+         "mimeType = 'application/vnd.google-apps.folder' and trashed = false")
+    r = svc.files().list(q=q, fields="files(id,name)", supportsAllDrives=True,
+                         includeItemsFromAllDrives=True).execute()
+    if r.get("files"):
+        return r["files"][0]["id"]
+    meta = {"name": name, "parents": [parent_id],
+            "mimeType": "application/vnd.google-apps.folder"}
+    return svc.files().create(body=meta, fields="id",
+                              supportsAllDrives=True).execute()["id"]
+
+
 def download(svc, file_id, dest, mime=None):
     """Baja un archivo. Si es Google Sheet, lo exporta a xlsx."""
     if mime == GSHEET_MIME:

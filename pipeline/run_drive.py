@@ -61,15 +61,24 @@ def main(keep_crudos=False):
     print(f"Maestros existentes: {len([f for f in fijos_remote if f[1].lower().endswith('.xlsx')])}")
 
     # 3) procesar local
-    orchestrator.process_folder(d_crudos, d_norm, d_fijos)
+    results = orchestrator.process_folder(d_crudos, d_norm, d_fijos)
 
-    # 4) subir normalizados
-    norm_remote = drive.list_files(svc, cfg["normalizados"])
-    for f in sorted(os.listdir(d_norm)):
-        if f.lower().endswith(".xlsx") and not f.startswith("~$"):
-            _id, nuevo = drive.upsert_by_name(svc, os.path.join(d_norm, f),
-                                              cfg["normalizados"], norm_remote)
-            print(f"  norm subido ({'nuevo' if nuevo else 'reemplazado'}): {f}")
+    # 4) subir normalizados a una subcarpeta por MARCA (Reebok/Kappa/Crocs)
+    BRAND_DIR = {"reebok": "Reebok", "kappa": "Kappa", "crocs": "Crocs"}
+    brand_folders = {}          # marca -> folderId (cache)
+    brand_listing = {}          # folderId -> archivos (para upsert)
+    for r in results:
+        norm_path = os.path.join(d_norm, r["norm"])
+        if not os.path.exists(norm_path):
+            continue
+        carpeta = BRAND_DIR.get(r["brand"], "Otros")
+        if carpeta not in brand_folders:
+            fid = drive.get_or_create_folder(svc, cfg["normalizados"], carpeta)
+            brand_folders[carpeta] = fid
+            brand_listing[fid] = drive.list_files(svc, fid)
+        fid = brand_folders[carpeta]
+        _id, nuevo = drive.upsert_by_name(svc, norm_path, fid, brand_listing[fid])
+        print(f"  norm -> {carpeta}/{r['norm']} ({'nuevo' if nuevo else 'reemplazado'})")
 
     # 5) subir/actualizar maestros en su lugar
     for f in sorted(os.listdir(d_fijos)):

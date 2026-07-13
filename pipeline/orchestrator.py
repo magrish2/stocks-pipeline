@@ -49,11 +49,13 @@ def process_raw(raw, normalizados_dir, fijos_dir):
     os.makedirs(fijos_dir, exist_ok=True)
     base = os.path.splitext(os.path.basename(raw))[0]
     key = match.key_for(raw)
+    brand = engine.detect_brand(raw)
 
     # 1) Normalizado completo -> NORMALIZADOS
     norm_out = os.path.join(normalizados_dir, base + " NORMALIZADO.xlsx")
     engine.normalize(raw, norm_out)
     print(f"  normalizado -> {os.path.basename(norm_out)}")
+    norm_name = os.path.basename(norm_out)
 
     # 2) Maestro en FIJOS. No se borra nada: lo sin stock queda en 0.
     master = _find_master(fijos_dir, key)
@@ -61,7 +63,8 @@ def process_raw(raw, normalizados_dir, fijos_dir):
         master_out = os.path.join(fijos_dir, f"MAESTRO {key}.xlsx")
         engine.normalize(raw, master_out)          # incluye los de stock 0
         print(f"  maestro NUEVO ({key}) -> {os.path.basename(master_out)}")
-        return {"key": key, "master": master_out, "created": True}
+        return {"key": key, "brand": brand, "norm": norm_name,
+                "master": master_out, "created": True}
 
     # existe: arrastrar Pedido, regenerar en su lugar y dejar en 0 los que
     # desaparecieron del crudo (no se borran).
@@ -75,7 +78,8 @@ def process_raw(raw, normalizados_dir, fijos_dir):
     print(f"  maestro ACTUALIZADO ({key}): +{len(d['altas'])} altas, "
           f"{n_ghost} dejados en 0, ~{len(d['cambios'])} cambios de cantidad "
           f"(Pedido conservado: {len(carry)})")
-    return {"key": key, "master": master, "created": False, "diff": d}
+    return {"key": key, "brand": brand, "norm": norm_name,
+            "master": master, "created": False, "diff": d}
 
 
 def process_folder(crudos_dir, normalizados_dir, fijos_dir):
