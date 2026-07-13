@@ -51,6 +51,14 @@ def process_raw(raw, normalizados_dir, fijos_dir):
     key = match.key_for(raw)
     brand = engine.detect_brand(raw)
 
+    # 0) ¿Es un PENDIENTE (pedidos por cliente)? -> solo imágenes, sin maestro.
+    if engine.is_pendiente(raw):
+        out = os.path.join(normalizados_dir, base + " CON IMAGENES.xlsx")
+        engine.add_images_pendiente(raw, out)
+        print(f"  pendiente (con imágenes) -> {os.path.basename(out)}")
+        return {"key": None, "brand": brand, "pendiente": True,
+                "norm": os.path.basename(out), "master": None}
+
     # 1) Normalizado completo -> NORMALIZADOS
     norm_out = os.path.join(normalizados_dir, base + " NORMALIZADO.xlsx")
     engine.normalize(raw, norm_out)

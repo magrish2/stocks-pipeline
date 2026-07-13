@@ -59,9 +59,8 @@ def _sheets_for(path, brand):
     return None                                # Reebok: cmd_run elige CALZADO/INDUMENTARIA
 
 
-def normalize(raw, out_path, skip_out_of_stock=False, carry=None, thumb_px=512):
-    """Normaliza `raw` a `out_path`. Devuelve out_path."""
-    brand = detect_brand(raw)
+def _apply_brand(brand, thumb_px=512):
+    """Configura la fuente de imágenes (CDN/finder) según la marca."""
     ns.THUMB_PX = thumb_px
     ns.IMAGE_URL_FINDER = None
     if brand == "kappa":
@@ -76,10 +75,47 @@ def normalize(raw, out_path, skip_out_of_stock=False, carry=None, thumb_px=512):
         ns.IMAGE_URL_FINDER = finder
     else:
         ns.REEBOK_CDN = REEBOK_CDN
+
+
+def normalize(raw, out_path, skip_out_of_stock=False, carry=None, thumb_px=512):
+    """Normaliza `raw` a `out_path`. Devuelve out_path."""
+    brand = detect_brand(raw)
+    _apply_brand(brand, thumb_px)
     args = SimpleNamespace(
         input=raw, output=out_path, source="reebok", no_images=False,
         image_mode="embed", online=True, limit=None,
         sheets=_sheets_for(raw, brand),
         skip_out_of_stock=skip_out_of_stock, carry=carry)
     ns.cmd_run(args)
+    return out_path
+
+
+# Columnas que delatan un archivo de "pendientes" (pedidos por cliente), no un stock.
+PENDIENTE_MARKERS = {"a liberar", "nº documento", "n° documento",
+                     "nro documento", "nombre sn"}
+
+
+def is_pendiente(path):
+    """True si el archivo es un listado de pendientes (no un stock)."""
+    try:
+        for sh in ns.list_sheets(path):
+            rows = ns.read_sheet_rows(path, sh)
+            for r in rows[:8]:
+                names = {re.sub(r"\s+", " ", str(c).strip()).lower()
+                         for c in r if c is not None}
+                if names & PENDIENTE_MARKERS:
+                    return True
+    except Exception:
+        pass
+    return False
+
+
+def add_images_pendiente(raw, out_path, thumb_px=512):
+    """Agrega columna Imagen (por SKU, según marca) a un pendiente, conservando
+    todas sus columnas. No genera maestro."""
+    brand = detect_brand(raw)
+    _apply_brand(brand, thumb_px)
+    args = SimpleNamespace(input=raw, output=out_path, sku_col="Número",
+                           source="reebok", fallback_stock=None, sheets=None)
+    ns.cmd_add_images(args)
     return out_path

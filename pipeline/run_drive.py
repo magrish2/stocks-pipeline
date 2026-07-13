@@ -71,7 +71,7 @@ def main(keep_crudos=False):
         norm_path = os.path.join(d_norm, r["norm"])
         if not os.path.exists(norm_path):
             continue
-        carpeta = BRAND_DIR.get(r["brand"], "Otros")
+        carpeta = "Pendientes" if r.get("pendiente") else BRAND_DIR.get(r["brand"], "Otros")
         if carpeta not in brand_folders:
             fid = drive.get_or_create_folder(svc, cfg["normalizados"], carpeta)
             brand_folders[carpeta] = fid
