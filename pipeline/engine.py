@@ -110,12 +110,68 @@ def is_pendiente(path):
     return False
 
 
+_SHOPIFY = {
+    "reebok": "https://reebok.com.ar/cdn/shop/files/{name}?width=1024",
+    "kappa": "https://www.kappastore.com.ar/cdn/shop/files/{name}?width=1024",
+}
+_SUFFIXES = ["-1.jpg", "_1.jpg", "-1.png"]
+
+
+def _shopify_probe(base, model, sess):
+    for suf in _SUFFIXES:
+        url = base.format(name=str(model).strip() + suf)
+        try:
+            r = sess.head(url, timeout=10, allow_redirects=True)
+            if r.status_code == 200 and \
+                    r.headers.get("content-type", "").startswith("image"):
+                return url
+        except Exception:
+            pass
+    return None
+
+
+def make_multibrand_finder():
+    """finder(model_code, session) que resuelve la foto según el prefijo del SKU:
+    RBK->reebok.com.ar, K#->kappastore, C#->crocs (multi-fuente)."""
+    _crocs = {}
+
+    def finder(model_code, session):
+        up = str(model_code).strip().upper()
+        if up.startswith("RBK"):
+            return _shopify_probe(_SHOPIFY["reebok"], model_code, session)
+        if re.match(r"^K\d", up):
+            return _shopify_probe(_SHOPIFY["kappa"], model_code, session)
+        if re.match(r"^C\d", up):
+            if "f" not in _crocs:
+                import crocs
+                _crocs["f"], _ = crocs.make_finder(session)
+            return _crocs["f"](model_code, session)
+        return None
+
+    return finder
+
+
+def _pendiente_sku_col(path):
+    """Nombre de la columna de SKU en un pendiente (header en la fila 1)."""
+    import openpyxl
+    ws = openpyxl.load_workbook(path, read_only=True).worksheets[0]
+    for c in range(1, (ws.max_column or 1) + 1):
+        v = ws.cell(1, c).value
+        if v and re.sub(r"\s+", " ", str(v).strip()).lower() in (
+                "número", "numero", "sku", "número de artículo",
+                "numero de articulo", "código", "codigo"):
+            return str(v)
+    return "Número"
+
+
 def add_images_pendiente(raw, out_path, thumb_px=512):
-    """Agrega columna Imagen (por SKU, según marca) a un pendiente, conservando
-    todas sus columnas. No genera maestro."""
-    brand = detect_brand(raw)
-    _apply_brand(brand, thumb_px)
-    args = SimpleNamespace(input=raw, output=out_path, sku_col="Número",
+    """Agrega columna Imagen a un pendiente (foto por SKU, marca por marca:
+    puede mezclar Reebok/Kappa/Crocs). Conserva todo; no genera maestro."""
+    ns.THUMB_PX = thumb_px
+    ns.IMAGE_URL_FINDER = make_multibrand_finder()
+    args = SimpleNamespace(input=raw, output=out_path,
+                           sku_col=_pendiente_sku_col(raw),
                            source="reebok", fallback_stock=None, sheets=None)
     ns.cmd_add_images(args)
+    ns.IMAGE_URL_FINDER = None
     return out_path
