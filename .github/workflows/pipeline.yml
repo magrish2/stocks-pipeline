@@ -1,14 +1,13 @@
 name: Stock pipeline
 
 on:
-  schedule:
-    # Cada 5 min en minutos desfasados (evita los ':00/:05' congestionados).
-    - cron: "3,8,13,18,23,28,33,38,43,48,53,58 * * * *"
-  workflow_dispatch: {}          # botón para correrlo a mano
+  # El disparo cada 5 min lo hace Cloudflare (workflow_dispatch). No usamos el
+  # cron de GitHub para no tener DOS fuentes que se cancelen entre sí.
+  workflow_dispatch: {}
 
 concurrency:
   group: stock-pipeline
-  cancel-in-progress: false      # no pisar una corrida en curso
+  cancel-in-progress: false      # una corrida en curso NO se cancela; las extra esperan
 
 jobs:
   run:
