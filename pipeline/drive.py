@@ -90,9 +90,13 @@ def update_content(svc, file_id, path, mime=XLSX_MIME):
 
 
 def trash(svc, file_id):
-    """Manda el archivo a la Papelera (recuperable 30 días)."""
-    return svc.files().update(fileId=file_id, body={"trashed": True},
-                              supportsAllDrives=True).execute()["id"]
+    """Manda el archivo a la Papelera. Tolerante a que ya no esté (corridas
+    solapadas): si falla, no rompe."""
+    try:
+        return svc.files().update(fileId=file_id, body={"trashed": True},
+                                  supportsAllDrives=True).execute()["id"]
+    except Exception:
+        return None
 
 
 def upsert_by_name(svc, path, folder_id, existing=None):

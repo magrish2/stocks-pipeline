@@ -1,13 +1,9 @@
 name: Stock pipeline
 
 on:
-  # El disparo cada 5 min lo hace Cloudflare (workflow_dispatch). No usamos el
-  # cron de GitHub para no tener DOS fuentes que se cancelen entre sí.
+  # El disparo cada 5 min lo hace Cloudflare (workflow_dispatch). Sin cron de
+  # GitHub y SIN concurrency: cada corrida termina sola (nunca se cancela).
   workflow_dispatch: {}
-
-concurrency:
-  group: stock-pipeline
-  cancel-in-progress: false      # una corrida en curso NO se cancela; las extra esperan
 
 jobs:
   run:
