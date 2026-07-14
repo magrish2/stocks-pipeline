@@ -12,6 +12,7 @@ import normalizar_kappa as nk
 
 REEBOK_CDN = "https://reebok.com.ar/cdn/shop/files/{name}?width=1024"
 KAPPA_CDN = "https://www.kappastore.com.ar/cdn/shop/files/{name}?width=1024"
+COLUMBIA_CDN = "https://columbiasportswear.com.ar/cdn/shop/files/{name}?width=1024"
 
 
 def _first_sku(path):
@@ -38,6 +39,8 @@ def detect_brand(path):
     n = os.path.basename(path).lower()
     if "kappa" in n:
         return "kappa"
+    if "columbia" in n:
+        return "columbia"
     if "croc" in n:
         return "crocs"
     if "reebok" in n or "rbk" in n:
@@ -46,6 +49,8 @@ def detect_brand(path):
     sku = _first_sku(path)
     if sku.startswith("RBK"):
         return "reebok"
+    if sku.startswith("COL"):
+        return "columbia"
     if re.match(r"^K\d", sku):
         return "kappa"
     if re.match(r"^C\d", sku):
@@ -65,6 +70,8 @@ def _apply_brand(brand, thumb_px=512):
     ns.IMAGE_URL_FINDER = None
     if brand == "kappa":
         ns.REEBOK_CDN = KAPPA_CDN
+    elif brand == "columbia":
+        ns.IMAGE_URL_FINDER = make_columbia_finder()
     elif brand == "crocs":
         # Crocs no tiene un CDN "adivinable" al 100%: usamos finder multi-fuente.
         import requests
@@ -130,15 +137,27 @@ def _shopify_probe(base, model, sess):
     return None
 
 
+def make_columbia_finder():
+    """finder para Columbia: saca los '--' finales del Modelo-Color y prueba el
+    CDN de columbiasportswear.com.ar (.jpg/.png)."""
+    def finder(model_code, sess):
+        m = re.sub(r"-+$", "", str(model_code).strip())
+        return _shopify_probe(COLUMBIA_CDN, m, sess)
+    return finder
+
+
 def make_multibrand_finder():
     """finder(model_code, session) que resuelve la foto según el prefijo del SKU:
-    RBK->reebok.com.ar, K#->kappastore, C#->crocs (multi-fuente)."""
+    RBK->reebok, COL->columbia, K#->kappastore, C#->crocs (multi-fuente)."""
     _crocs = {}
+    _col = make_columbia_finder()
 
     def finder(model_code, session):
         up = str(model_code).strip().upper()
         if up.startswith("RBK"):
             return _shopify_probe(_SHOPIFY["reebok"], model_code, session)
+        if up.startswith("COL"):
+            return _col(model_code, session)
         if re.match(r"^K\d", up):
             return _shopify_probe(_SHOPIFY["kappa"], model_code, session)
         if re.match(r"^C\d", up):
