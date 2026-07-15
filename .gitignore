@@ -22,3 +22,12 @@ meli_tokens.json
 # Estado local
 pipeline/.watch.lock
 meli_cache.json
+
+# Datos y carpetas de trabajo (no van al repo)
+.DS_Store
+Datos/
+kappa/
+.cache_img_300px_bak/
+descargar-imagenes-exe/
+*.command
+*.txt
