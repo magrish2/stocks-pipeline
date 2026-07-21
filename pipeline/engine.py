@@ -61,6 +61,12 @@ def detect_brand(path):
 def _sheets_for(path, brand):
     if brand == "kappa":
         return nk.stock_sheets(path)          # excluye BASE SKU / Hoja2 / (2)
+    if brand == "columbia":
+        # Solo las hojas de presentación; ignora RESUMEN y las hojas "STOCK …"
+        # (data cruda) que traen los disponibles de Columbia.
+        want = ("indumentaria", "calzado", "accesorios")
+        present = [s for s in ns.list_sheets(path) if s.strip().lower() in want]
+        return present or None
     return None                                # Reebok: cmd_run elige CALZADO/INDUMENTARIA
 
 

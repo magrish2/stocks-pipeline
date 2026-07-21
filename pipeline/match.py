@@ -20,6 +20,8 @@ def key_for(filename):
 
     if "kappa" in n:
         marca = "kappa"
+    elif "columbia" in n:
+        marca = "columbia"
     elif "croc" in n:
         marca = "crocs"
     elif "reebok" in n or "rbk" in n:

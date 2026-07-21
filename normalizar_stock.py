@@ -818,7 +818,8 @@ def normalize_sheet(ws_out, rows, token, cache, session, opts, orig_images=None)
     i_maypp = pick(cmap, "Mayorista unit. + PP", "Mayorista unit + PP",
                    "Mayorista Primera PP", "Módulo Mayorista")   # Crocs: módulo
     i_pub = pick(cmap, "Público", "Publico", "Individual Público",
-                 "Individual Publico")              # Crocs
+                 "Individual Publico",              # Crocs
+                 "RETAIL", "Retail")                # Columbia (precio público)
     i_genero = pick(cmap, "GÉNERO", "Género", "Genero", "Gender")
 
     if i_sku is None or i_desc is None:
