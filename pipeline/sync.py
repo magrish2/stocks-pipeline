@@ -38,8 +38,8 @@ def read_pedido_map(master_path):
 
 
 def stock_map(path):
-    """{SKU: Disponibilidad} de un normalizado (para el diff de reportes)."""
-    return _col_map(path, "SKU", "Disponibilidad")
+    """{SKU: Disponible} de un normalizado (para el diff de reportes)."""
+    return _col_map(path, "SKU", "Disponible")
 
 
 def diff(old_master_path, new_master_path):

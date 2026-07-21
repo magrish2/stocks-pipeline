@@ -58,7 +58,7 @@ def carry_zero(new_path, old_path, log=print):
                 continue
             for h in common:
                 val = old_ws.cell(r, ho[h]).value
-                if h == "Disponibilidad":
+                if h == "Disponible":
                     val = 0                      # el que desapareció -> 0
                 cell = ws.cell(at, hn[h], value=val)
                 cell.alignment = Alignment(vertical="center", wrap_text=(h in

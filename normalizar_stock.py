@@ -748,7 +748,9 @@ def resolve_model_image(modelo_key, model_code, query, cache, session,
 # --------------------------------------------------------------------------- #
 # Generación del Excel normalizado
 # --------------------------------------------------------------------------- #
-OUT_HEADERS = ["Foto", "SKU", "Descripción", "Género", "Disponibilidad",
+# "Disponible" (no "Disponibilidad"): así lo detectan lectores externos que
+# buscan la palabra DISPONIBLE (p. ej. la web Grisma).
+OUT_HEADERS = ["Foto", "SKU", "Descripción", "Género", "Disponible",
                "Precio mayorista", "Mayorista + PP", "Precio público", "Pedido"]
 
 HEADER_FILL = PatternFill("solid", fgColor="1F2937")
@@ -902,7 +904,7 @@ def normalize_sheet(ws_out, rows, token, cache, session, opts, orig_images=None)
         c_sku = ws_out.cell(row=out_row, column=2, value=sku)
         ws_out.cell(row=out_row, column=3, value=desc)
         ws_out.cell(row=out_row, column=4, value=genero)
-        ws_out.cell(row=out_row, column=5, value=disp)
+        ws_out.cell(row=out_row, column=5, value=disp_value(disp))  # numérico
         cmay = ws_out.cell(row=out_row, column=6, value=may)
         cmaypp = ws_out.cell(row=out_row, column=7, value=maypp)
         cpub = ws_out.cell(row=out_row, column=8, value=pub)
@@ -1112,6 +1114,20 @@ def in_stock(disp):
         return float(num) > 0
     except ValueError:
         return True  # texto no vacío no numérico -> lo consideramos con stock
+
+
+def disp_value(disp):
+    """Disponibilidad como número limpio (apto para lectores externos que hacen
+    to_numeric). '+ 240' -> 240, '153' -> 153, vacío/None -> None."""
+    if disp is None:
+        return None
+    if isinstance(disp, (int, float)):
+        return disp
+    s = str(disp).strip()
+    if not s:
+        return None
+    m = re.search(r"\d+", s.replace(".", "").replace(",", ""))
+    return int(m.group()) if m else None
 
 
 def model_from_sku(sku):
