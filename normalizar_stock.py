@@ -751,7 +751,8 @@ def resolve_model_image(modelo_key, model_code, query, cache, session,
 # "Disponible" (no "Disponibilidad"): así lo detectan lectores externos que
 # buscan la palabra DISPONIBLE (p. ej. la web Grisma).
 OUT_HEADERS = ["Foto", "SKU", "Descripción", "Género", "Disponible",
-               "Precio mayorista", "Mayorista + PP", "Precio público", "Pedido"]
+               "Precio mayorista", "Mayorista + PP", "Precio público",
+               "Descuento %", "Pedido"]
 
 HEADER_FILL = PatternFill("solid", fgColor="1F2937")
 HEADER_FONT = Font(color="FFFFFF", bold=True, size=11)
@@ -811,12 +812,16 @@ def normalize_sheet(ws_out, rows, token, cache, session, opts, orig_images=None)
             if key.startswith("disponible") or key.startswith("stock"):
                 i_disp = idx
                 break
-    # Prioridad: precio unitario "limpio"; si no hay (planillas de promo),
-    # el "con descuento" (precio real de la promo); luego +PP y otros.
-    i_may = pick(cmap, "Mayorista Unitario", "Mayorista con descuento",
-                 "Mayorista con Descuento", "Mayorista unit. + PP",
-                 "Mayorista", "Mayorista Primera Individual",
-                 "Individual Mayorista")            # Crocs
+    # Precio mayorista POR PAR (individual, precio de lista).
+    i_may_unit = pick(cmap, "Mayorista Unitario", "Mayorista",
+                      "Mayorista Primera Individual",
+                      "Individual Mayorista",        # Crocs
+                      "MAYORISTA")                   # Columbia
+    # Promos: total del MÓDULO ya con descuento (ej. "Mayorista con descuento").
+    i_may_desc = pick(cmap, "Mayorista con descuento", "Mayorista con Descuento")
+    # % de descuento (promos).
+    i_desc_pct = pick(cmap, "Descuento", "DESCUENTO", "Descuento %", "% Descuento")
+    # Precio del MÓDULO (total caja, lista): Mayorista + PP.
     i_maypp = pick(cmap, "Mayorista unit. + PP", "Mayorista unit + PP",
                    "Mayorista Primera PP", "Módulo Mayorista")   # Crocs: módulo
     i_pub = pick(cmap, "Público", "Publico", "Individual Público",
@@ -840,7 +845,8 @@ def normalize_sheet(ws_out, rows, token, cache, session, opts, orig_images=None)
 
     # Anchos de columna (la Foto se calibra a PHOTO_COL_PX)
     photo_w = round((PHOTO_COL_PX - 5) / 7, 2)
-    widths = {1: photo_w, 2: 24, 3: 50, 4: 10, 5: 15, 6: 16, 7: 16, 8: 16, 9: 11}
+    widths = {1: photo_w, 2: 24, 3: 50, 4: 10, 5: 15, 6: 16, 7: 16, 8: 16,
+              9: 11, 10: 11}   # 9=Descuento %, 10=Pedido
     for c, w in widths.items():
         ws_out.column_dimensions[get_column_letter(c)].width = w
 
@@ -848,7 +854,8 @@ def normalize_sheet(ws_out, rows, token, cache, session, opts, orig_images=None)
     # descartarlas, se anexan a la derecha OCULTAS (con su encabezado) para
     # poder mostrarlas si alguna vez se necesita esa info.
     i_img = pick(cmap, "Imagen", "FOTO", "Foto")
-    consumed = {i_img, i_sku, i_desc, i_genero, i_disp, i_may, i_maypp, i_pub}
+    consumed = {i_img, i_sku, i_desc, i_genero, i_disp, i_may_unit, i_may_desc,
+                i_desc_pct, i_maypp, i_pub}
     extra_cols = []  # (idx_origen_0based, nombre)
     for j, name in enumerate(header):
         if name is None or j in consumed:
@@ -893,9 +900,23 @@ def normalize_sheet(ws_out, rows, token, cache, session, opts, orig_images=None)
         modelo = g(i_modelo) or sku
         genero = g(i_genero)
         disp = g(i_disp)
-        may = g(i_may)
-        maypp = g(i_maypp)
         pub = g(i_pub)
+
+        # --- Precio mayorista SIEMPRE por par (así un lector externo puede
+        #     multiplicar × pares y obtener el módulo). En promos el origen da
+        #     el módulo con descuento: lo pasamos a por-par dividiendo por pares.
+        pares = get_pares(sku)
+        may_desc_mod = _to_num(g(i_may_desc))     # módulo con descuento (promo)
+        descuento = None
+        if may_desc_mod is not None:              # es una promo
+            may = may_desc_mod / pares if pares else may_desc_mod   # por par
+            maypp = may_desc_mod                  # Mayorista + PP = módulo (ya con dto.)
+            descuento = descuento_pct(g(i_desc_pct))
+        else:                                     # stock normal
+            may = _to_num(g(i_may_unit))
+            maypp = _to_num(g(i_maypp))
+            if may is None and maypp is not None and pares:
+                may = maypp / pares               # red de seguridad: derivar por par
 
         # Sync de maestro: saltear lo que quedó sin stock.
         if getattr(opts, "skip_out_of_stock", False) and not in_stock(disp):
@@ -908,21 +929,25 @@ def normalize_sheet(ws_out, rows, token, cache, session, opts, orig_images=None)
         cmay = ws_out.cell(row=out_row, column=6, value=may)
         cmaypp = ws_out.cell(row=out_row, column=7, value=maypp)
         cpub = ws_out.cell(row=out_row, column=8, value=pub)
+        cdesc = ws_out.cell(row=out_row, column=9, value=descuento)
+        if descuento is not None:
+            cdesc.number_format = '0"%"'
+        cdesc.alignment = Alignment(horizontal="center", vertical="center")
         c_sku.font = SKU_FONT
         for cell, val in ((cmay, may), (cmaypp, maypp), (cpub, pub)):
             cell.font = PRICE_FONT
             if isinstance(val, (int, float)):
                 cell.number_format = MONEY_FMT
-        # Pedido: a completar, salvo que se arrastre lo manual del maestro (sync).
+        # Pedido (col 10): a completar, salvo que se arrastre lo manual (sync).
         carry = getattr(opts, "carry", None)
         ped = carry.get(str(sku).strip()) if carry and sku is not None else None
-        ws_out.cell(row=out_row, column=9, value=ped)
+        ws_out.cell(row=out_row, column=10, value=ped)
 
         band = BAND_FILL if (out_row % 2 == 0) else None
-        for c in range(1, 10):
+        for c in range(1, 11):
             cell = ws_out.cell(row=out_row, column=c)
             cell.border = BORDER
-            if c == 9:
+            if c == 10:
                 cell.fill = PEDIDO_FILL        # columna Pedido siempre resaltada
             elif band is not None:
                 cell.fill = band
@@ -1128,6 +1153,40 @@ def disp_value(disp):
         return None
     m = re.search(r"\d+", s.replace(".", "").replace(",", ""))
     return int(m.group()) if m else None
+
+
+_MODULO_RE = re.compile(r"M(12|9|8|6)U?\s")
+
+
+def get_pares(sku):
+    """Pares por caja de un SKU de módulo Reebok/Kappa. Devuelve 1 si no es un
+    módulo. El pack se escribe 'M12 4/7.5', 'M12U 8/11.5', 'M9 ...' (Mnn seguido
+    de espacio y el rango de talles); así NO confunde talles Crocs '-M12'/'M4/W6'
+    (hombre 12, que van al final del SKU sin rango) con un módulo."""
+    m = _MODULO_RE.search(str(sku).upper())
+    return int(m.group(1)) if m else 1
+
+
+def _to_num(v):
+    """Valor numérico o None (los precios de origen ya vienen numéricos)."""
+    if v is None:
+        return None
+    if isinstance(v, (int, float)):
+        return v
+    try:
+        return float(str(v).replace("$", "").replace(",", ".").strip())
+    except ValueError:
+        return None
+
+
+def descuento_pct(v):
+    """Normaliza el descuento a % entero (0.40 -> 40, 40 -> 40). None si no aplica."""
+    x = _to_num(v)
+    if x is None or x <= 0:
+        return None
+    if x <= 1:            # viene como fracción (0.4) -> %
+        x *= 100
+    return round(x)
 
 
 def model_from_sku(sku):
