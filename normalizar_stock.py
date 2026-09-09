@@ -826,8 +826,19 @@ def normalize_sheet(ws_out, rows, token, cache, session, opts, orig_images=None)
                    "Mayorista Primera PP", "Módulo Mayorista")   # Crocs: módulo
     i_pub = pick(cmap, "Público", "Publico", "Individual Público",
                  "Individual Publico",              # Crocs
+                 "Precio Público", "Precio Publico",  # Kappa promo
                  "RETAIL", "Retail")                # Columbia (precio público)
     i_genero = pick(cmap, "GÉNERO", "Género", "Genero", "Gender")
+
+    # Promo formato Kappa: el % de descuento viene EN el nombre de la columna
+    # ("Mayorista unitario con 40 %"), así que se ubica por contenido, no exacto.
+    def _pick_contains(*needles):
+        for key, idx in cmap.items():
+            if all(nd in key for nd in needles):
+                return idx
+        return None
+    i_may_unit_desc = _pick_contains("mayorista unitario con", "%")  # por par c/dto
+    i_maypp_desc = _pick_contains("mayorista pp con", "%")           # módulo c/dto
 
     if i_sku is None or i_desc is None:
         print("  [!] Faltan columnas mínimas (SKU/Descripción); salteo la hoja.")
@@ -855,7 +866,7 @@ def normalize_sheet(ws_out, rows, token, cache, session, opts, orig_images=None)
     # poder mostrarlas si alguna vez se necesita esa info.
     i_img = pick(cmap, "Imagen", "FOTO", "Foto")
     consumed = {i_img, i_sku, i_desc, i_genero, i_disp, i_may_unit, i_may_desc,
-                i_desc_pct, i_maypp, i_pub}
+                i_desc_pct, i_maypp, i_pub, i_may_unit_desc, i_maypp_desc}
     extra_cols = []  # (idx_origen_0based, nombre)
     for j, name in enumerate(header):
         if name is None or j in consumed:
@@ -906,17 +917,31 @@ def normalize_sheet(ws_out, rows, token, cache, session, opts, orig_images=None)
         #     multiplicar × pares y obtener el módulo). En promos el origen da
         #     el módulo con descuento: lo pasamos a por-par dividiendo por pares.
         pares = get_pares(sku)
-        may_desc_mod = _to_num(g(i_may_desc))     # módulo con descuento (promo)
+        desc_pct = descuento_pct(g(i_desc_pct))        # % entero o None
+        may_desc_mod = _to_num(g(i_may_desc))          # Reebok: MÓDULO ya descontado
+        may_unit_desc = _to_num(g(i_may_unit_desc))    # Kappa: POR PAR ya descontado
+        maypp_desc = _to_num(g(i_maypp_desc))          # Kappa: MÓDULO ya descontado
         descuento = None
-        if may_desc_mod is not None:              # es una promo
+        if may_unit_desc is not None:             # promo formato Kappa (por par)
+            may = may_unit_desc
+            maypp = maypp_desc
+            descuento = desc_pct
+        elif may_desc_mod is not None:            # promo formato Reebok (módulo)
             may = may_desc_mod / pares if pares else may_desc_mod   # por par
             maypp = may_desc_mod                  # Mayorista + PP = módulo (ya con dto.)
-            descuento = descuento_pct(g(i_desc_pct))
+            descuento = desc_pct
         else:                                     # stock normal
             may = _to_num(g(i_may_unit))
             maypp = _to_num(g(i_maypp))
             if may is None and maypp is not None and pares:
                 may = maypp / pares               # red de seguridad: derivar por par
+            if desc_pct and may is not None:      # promo sin precio ya descontado
+                may = round(may * (1 - desc_pct / 100.0), 2)
+                maypp = None                      # se recalcula abajo (por par × pares)
+                descuento = desc_pct
+        # Contrato: Mayorista + PP = por-par × pares_por_caja (=may si pares==1).
+        if maypp is None and may is not None:
+            maypp = round(may * pares, 2) if (pares and pares != 1) else may
 
         # Sync de maestro: saltear lo que quedó sin stock.
         if getattr(opts, "skip_out_of_stock", False) and not in_stock(disp):
@@ -1155,7 +1180,7 @@ def disp_value(disp):
     return int(m.group()) if m else None
 
 
-_MODULO_RE = re.compile(r"M(12|9|8|6)U?\s")
+_MODULO_RE = re.compile(r"M(12|9|8|6)[A-Z]*\s")
 
 
 def get_pares(sku):
