@@ -483,6 +483,16 @@ def pick(cmap, *candidates):
     return None
 
 
+def pick_re(cmap, pattern):
+    """Como pick() pero por patrón regex sobre las claves (para columnas con % variable,
+    ej. 'Mayorista unitario con 40 %'). Devuelve el primer índice que matchea."""
+    rx = re.compile(pattern)
+    for key, idx in cmap.items():
+        if rx.search(key):
+            return idx
+    return None
+
+
 MODEL_CODE_RE = re.compile(r"^\s*([A-Z]{2}\d{3,5}|[A-Z0-9]{6})\s*-\s")
 
 # Mapa de colores inglés (como vienen en la descripción Reebok) -> español
@@ -819,12 +829,18 @@ def normalize_sheet(ws_out, rows, token, cache, session, opts, orig_images=None)
                       "MAYORISTA")                   # Columbia
     # Promos: total del MÓDULO ya con descuento (ej. "Mayorista con descuento").
     i_may_desc = pick(cmap, "Mayorista con descuento", "Mayorista con Descuento")
+    # Promos estilo Kappa: precio POR PAR ya descontado ("Mayorista unitario con 40 %")
+    # y módulo ya descontado ("Mayorista PP con 40 %"). El % es variable => regex.
+    i_may_unit_desc = pick_re(cmap, r"mayorista\s+unit\w*\s+con\s+\d+\s*%")
+    i_maypp_desc = pick_re(cmap, r"mayorista\s+pp\s+con\s+\d+\s*%")
     # % de descuento (promos).
     i_desc_pct = pick(cmap, "Descuento", "DESCUENTO", "Descuento %", "% Descuento")
     # Precio del MÓDULO (total caja, lista): Mayorista + PP.
     i_maypp = pick(cmap, "Mayorista unit. + PP", "Mayorista unit + PP",
-                   "Mayorista Primera PP", "Módulo Mayorista")   # Crocs: módulo
-    i_pub = pick(cmap, "Público", "Publico", "Individual Público",
+                   "Mayorista Primera PP", "Módulo Mayorista",  # Crocs: módulo
+                   "Mayorista PP")                              # Kappa: módulo lista
+    i_pub = pick(cmap, "Público", "Publico", "Precio Público", "Precio Publico",
+                 "Individual Público",
                  "Individual Publico",              # Crocs
                  "RETAIL", "Retail")                # Columbia (precio público)
     i_genero = pick(cmap, "GÉNERO", "Género", "Genero", "Gender")
@@ -855,7 +871,7 @@ def normalize_sheet(ws_out, rows, token, cache, session, opts, orig_images=None)
     # poder mostrarlas si alguna vez se necesita esa info.
     i_img = pick(cmap, "Imagen", "FOTO", "Foto")
     consumed = {i_img, i_sku, i_desc, i_genero, i_disp, i_may_unit, i_may_desc,
-                i_desc_pct, i_maypp, i_pub}
+                i_may_unit_desc, i_maypp_desc, i_desc_pct, i_maypp, i_pub}
     extra_cols = []  # (idx_origen_0based, nombre)
     for j, name in enumerate(header):
         if name is None or j in consumed:
@@ -906,17 +922,26 @@ def normalize_sheet(ws_out, rows, token, cache, session, opts, orig_images=None)
         #     multiplicar × pares y obtener el módulo). En promos el origen da
         #     el módulo con descuento: lo pasamos a por-par dividiendo por pares.
         pares = get_pares(sku)
-        may_desc_mod = _to_num(g(i_may_desc))     # módulo con descuento (promo)
-        descuento = None
-        if may_desc_mod is not None:              # es una promo
+        may_desc_mod = _to_num(g(i_may_desc))       # Reebok: módulo con descuento
+        may_unit_desc = _to_num(g(i_may_unit_desc)) # Kappa: por par ya descontado
+        maypp_desc = _to_num(g(i_maypp_desc))       # Kappa: módulo ya descontado
+        descuento = descuento_pct(g(i_desc_pct))    # % (columna "Descuento"), si hay
+        if may_unit_desc is not None:               # promo Kappa (precio por par con dto.)
+            may = may_unit_desc
+            maypp = maypp_desc if maypp_desc is not None else (
+                may * pares if (may is not None and pares) else may)
+        elif may_desc_mod is not None:              # promo Reebok (módulo con dto.)
             may = may_desc_mod / pares if pares else may_desc_mod   # por par
-            maypp = may_desc_mod                  # Mayorista + PP = módulo (ya con dto.)
-            descuento = descuento_pct(g(i_desc_pct))
-        else:                                     # stock normal
+            maypp = may_desc_mod                    # Mayorista + PP = módulo (ya con dto.)
+        else:                                       # stock normal
             may = _to_num(g(i_may_unit))
             maypp = _to_num(g(i_maypp))
             if may is None and maypp is not None and pares:
                 may = maypp / pares               # red de seguridad: derivar por par
+            # Promo sin columna de precio descontado pero con % => aplicarlo sobre la lista.
+            if descuento and may is not None:
+                may = round(may * (1 - descuento / 100.0), 2)
+                maypp = round(may * pares, 2) if pares else may
 
         # Sync de maestro: saltear lo que quedó sin stock.
         if getattr(opts, "skip_out_of_stock", False) and not in_stock(disp):
