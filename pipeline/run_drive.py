@@ -64,7 +64,8 @@ def main(keep_crudos=False):
     results = orchestrator.process_folder(d_crudos, d_norm, d_fijos)
 
     # 4) subir normalizados a una subcarpeta por MARCA (Reebok/Kappa/Crocs)
-    BRAND_DIR = {"reebok": "Reebok", "kappa": "Kappa", "crocs": "Crocs"}
+    BRAND_DIR = {"reebok": "Reebok", "kappa": "Kappa", "crocs": "Crocs",
+                 "columbia": "Columbia"}
     brand_folders = {}          # marca -> folderId (cache)
     brand_listing = {}          # folderId -> archivos (para upsert)
     for r in results:
