@@ -890,6 +890,21 @@ def normalize_sheet(ws_out, rows, token, cache, session, opts, orig_images=None)
         col.width = 16
         col.hidden = True   # oculta; el usuario puede mostrarla cuando quiera
 
+    # UDM es obligatoria para el sistema destino. Si el origen NO la trae
+    # (ej. Columbia), se crea una columna 'UDM' sintética (oculta) y se completa
+    # por fila según los pares (Unidades / Pack de N Unidades).
+    synth_udm_col = None
+    if i_udm is None:
+        synth_udm_col = extra_start + len(extra_cols)
+        cell = ws_out.cell(row=1, column=synth_udm_col, value="UDM")
+        cell.fill = HEADER_FILL
+        cell.font = HEADER_FONT
+        cell.alignment = Alignment(horizontal="center", vertical="center",
+                                   wrap_text=True)
+        col = ws_out.column_dimensions[get_column_letter(synth_udm_col)]
+        col.width = 16
+        col.hidden = True
+
     out_row = 2
     seen_models = set()
     n_imgs = 0
@@ -996,6 +1011,13 @@ def normalize_sheet(ws_out, rows, token, cache, session, opts, orig_images=None)
             if isinstance(val, (int, float)):
                 cell.number_format = MONEY_FMT
 
+        # UDM sintética (si el origen no la tenía): coherente con los pares.
+        if synth_udm_col is not None:
+            udm_val = "Unidades" if (not pares or pares == 1) \
+                else f"Pack de {pares} Unidades"
+            cell = ws_out.cell(row=out_row, column=synth_udm_col, value=udm_val)
+            cell.alignment = Alignment(horizontal="center", vertical="center")
+
         # --- Foto ---
         if opts.image_mode != "off":
             code = manufacturer_code(desc)
@@ -1065,7 +1087,7 @@ def normalize_sheet(ws_out, rows, token, cache, session, opts, orig_images=None)
     # ocultan junto con su fila cuando se aplica un filtro.
     last = out_row - 1
     if last >= 1:
-        last_col = len(OUT_HEADERS) + len(extra_cols)
+        last_col = len(OUT_HEADERS) + len(extra_cols) + (1 if synth_udm_col else 0)
         ws_out.auto_filter.ref = f"B1:{get_column_letter(last_col)}{last}"
 
     return out_row - 2
