@@ -829,6 +829,10 @@ def normalize_sheet(ws_out, rows, token, cache, session, opts, orig_images=None)
                  "Precio Público", "Precio Publico",  # Kappa promo
                  "RETAIL", "Retail")                # Columbia (precio público)
     i_genero = pick(cmap, "GÉNERO", "Género", "Genero", "Gender")
+    # UDM: autoridad par/módulo (Pares/Unidades=1, Pack de N=N). Queda como
+    # columna oculta a la derecha (no se agrega a 'consumed').
+    i_udm = pick(cmap, "UDM", "UdM", "U.M.", "Uni. Medida", "Unidad de medida",
+                 "UM_INVENTARIO")
 
     # Promo formato Kappa: el % de descuento viene EN el nombre de la columna
     # ("Mayorista unitario con 40 %"), así que se ubica por contenido, no exacto.
@@ -916,31 +920,32 @@ def normalize_sheet(ws_out, rows, token, cache, session, opts, orig_images=None)
         # --- Precio mayorista SIEMPRE por par (así un lector externo puede
         #     multiplicar × pares y obtener el módulo). En promos el origen da
         #     el módulo con descuento: lo pasamos a por-par dividiendo por pares.
-        pares = get_pares(sku)
+        pares = pares_from_udm(g(i_udm))               # UDM manda (contrato)
+        if pares is None:
+            pares = get_pares(sku)                     # fallback: heurístico del SKU
         desc_pct = descuento_pct(g(i_desc_pct))        # % entero o None
         may_desc_mod = _to_num(g(i_may_desc))          # Reebok: MÓDULO ya descontado
         may_unit_desc = _to_num(g(i_may_unit_desc))    # Kappa: POR PAR ya descontado
-        maypp_desc = _to_num(g(i_maypp_desc))          # Kappa: MÓDULO ya descontado
         descuento = None
         if may_unit_desc is not None:             # promo formato Kappa (por par)
             may = may_unit_desc
-            maypp = maypp_desc
             descuento = desc_pct
-        elif may_desc_mod is not None:            # promo formato Reebok (módulo)
-            may = may_desc_mod / pares if pares else may_desc_mod   # por par
-            maypp = may_desc_mod                  # Mayorista + PP = módulo (ya con dto.)
+        elif may_desc_mod is not None:            # promo formato Reebok (módulo → por par)
+            may = may_desc_mod / pares if pares else may_desc_mod
             descuento = desc_pct
         else:                                     # stock normal
             may = _to_num(g(i_may_unit))
-            maypp = _to_num(g(i_maypp))
-            if may is None and maypp is not None and pares:
-                may = maypp / pares               # red de seguridad: derivar por par
+            if may is None:                       # sólo vino el módulo → derivar por par
+                mm = _to_num(g(i_maypp))
+                if mm is not None and pares:
+                    may = mm / pares
             if desc_pct and may is not None:      # promo sin precio ya descontado
                 may = round(may * (1 - desc_pct / 100.0), 2)
-                maypp = None                      # se recalcula abajo (por par × pares)
                 descuento = desc_pct
         # Contrato: Mayorista + PP = por-par × pares_por_caja (=may si pares==1).
-        if maypp is None and may is not None:
+        # SIEMPRE computado (no se confía en la columna de módulo del origen).
+        maypp = None
+        if may is not None:
             maypp = round(may * pares, 2) if (pares and pares != 1) else may
 
         # Sync de maestro: saltear lo que quedó sin stock.
@@ -1181,6 +1186,21 @@ def disp_value(disp):
 
 
 _MODULO_RE = re.compile(r"M(12|9|8|6)[A-Z]*\s")
+
+
+def pares_from_udm(udm):
+    """Pares por caja según la UDM (fuente autoritativa del contrato):
+    'Pack de N Unidades' -> N ; 'Pares'/'Unidades' -> 1. None si no se reconoce
+    (ahí se cae al heurístico del SKU en get_pares)."""
+    if udm is None:
+        return None
+    s = re.sub(r"\s+", " ", str(udm).strip().lower())
+    m = re.search(r"pack\s*de\s*(\d+)", s)
+    if m:
+        return int(m.group(1))
+    if "unidad" in s or "par" in s:   # Unidades / Pares -> 1 por caja
+        return 1
+    return None
 
 
 def get_pares(sku):
