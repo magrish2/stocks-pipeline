@@ -21,7 +21,6 @@ import tempfile
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import engine
-import ghosts
 import match
 import sync
 
@@ -65,7 +64,7 @@ def process_raw(raw, normalizados_dir, fijos_dir):
     print(f"  normalizado -> {os.path.basename(norm_out)}")
     norm_name = os.path.basename(norm_out)
 
-    # 2) Maestro en FIJOS. No se borra nada: lo sin stock queda en 0.
+    # 2) Maestro en FIJOS. Regenera desde el crudo; lo que desaparece se borra.
     master = _find_master(fijos_dir, key)
     if master is None:
         master_out = os.path.join(fijos_dir, f"MAESTRO {key}.xlsx")
@@ -74,17 +73,17 @@ def process_raw(raw, normalizados_dir, fijos_dir):
         return {"key": key, "brand": brand, "norm": norm_name,
                 "master": master_out, "created": True}
 
-    # existe: arrastrar Pedido, regenerar en su lugar y dejar en 0 los que
-    # desaparecieron del crudo (no se borran).
+    # existe: arrastrar Pedido y regenerar en su lugar. Los SKU que
+    # desaparecieron del crudo se BORRAN (ya no se dejan en 0).
     carry = sync.read_pedido_map(master)
     tmp = tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False).name
-    shutil.copy2(master, tmp)                      # copia del maestro viejo
-    engine.normalize(raw, master, carry=carry)     # presentes (incl. 0)
-    n_ghost = ghosts.carry_zero(master, tmp)       # desaparecidos -> fila en 0
+    shutil.copy2(master, tmp)                      # copia del maestro viejo (para el diff)
+    engine.normalize(raw, master, carry=carry)     # solo lo presente en el crudo
     d = sync.diff(tmp, master)
     os.remove(tmp)
     print(f"  maestro ACTUALIZADO ({key}): +{len(d['altas'])} altas, "
-          f"{n_ghost} dejados en 0, ~{len(d['cambios'])} cambios de cantidad "
+          f"{len(d['bajas'])} borrados (desaparecidos del crudo), "
+          f"~{len(d['cambios'])} cambios de cantidad "
           f"(Pedido conservado: {len(carry)})")
     return {"key": key, "brand": brand, "norm": norm_name,
             "master": master, "created": False, "diff": d}
