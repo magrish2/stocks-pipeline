@@ -114,10 +114,15 @@ def trash(svc, file_id):
 
 
 def upsert_by_name(svc, path, folder_id, existing=None):
-    """Sube si no existe (por nombre en la carpeta) o reemplaza contenido si sí."""
+    """Sube si no existe (por nombre en la carpeta) o reemplaza contenido si sí.
+    Si hubiera varias copias con el mismo nombre, actualiza UNA y manda el resto
+    a la Papelera (evita que se acumulen duplicados)."""
     name = os.path.basename(path)
     existing = existing if existing is not None else list_files(svc, folder_id)
-    for fid, fname, _m in existing:
-        if fname == name:
-            return update_content(svc, fid, path), False
+    matches = [fid for fid, fname, _m in existing if fname == name]
+    if matches:
+        update_content(svc, matches[0], path)
+        for extra in matches[1:]:
+            trash(svc, extra)              # dedupe: borra copias sobrantes
+        return matches[0], False
     return upload_new(svc, path, folder_id), True

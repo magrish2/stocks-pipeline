@@ -81,11 +81,13 @@ def main(keep_crudos=False):
         _id, nuevo = drive.upsert_by_name(svc, norm_path, fid, brand_listing[fid])
         print(f"  norm -> {carpeta}/{r['norm']} ({'nuevo' if nuevo else 'reemplazado'})")
 
-    # 5) subir/actualizar maestros en su lugar
+    # 5) subir/actualizar maestros en su lugar. Se relee FIJOS ahora (no el
+    #    listado viejo del paso 2) para no crear duplicados si algo cambió.
+    fijos_now = drive.list_files(svc, cfg["fijos"])
     for f in sorted(os.listdir(d_fijos)):
         if f.lower().endswith(".xlsx") and not f.startswith("~$"):
             _id, nuevo = drive.upsert_by_name(svc, os.path.join(d_fijos, f),
-                                              cfg["fijos"], fijos_remote)
+                                              cfg["fijos"], fijos_now)
             print(f"  maestro {'creado' if nuevo else 'actualizado en su lugar'}: {f}")
 
     # 6) recién ahora (todo subido OK) mandar los crudos a la Papelera
