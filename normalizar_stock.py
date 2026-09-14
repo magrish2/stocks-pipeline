@@ -751,8 +751,8 @@ def resolve_model_image(modelo_key, model_code, query, cache, session,
 # "Disponible" (no "Disponibilidad"): así lo detectan lectores externos que
 # buscan la palabra DISPONIBLE (p. ej. la web Grisma).
 OUT_HEADERS = ["Foto", "SKU", "Descripción", "Género", "Disponible",
-               "Precio mayorista", "Mayorista + PP", "Precio público",
-               "Descuento %", "Pedido"]
+               "Precio mayorista", "Mayorista + PP", "Mayorista con descuento",
+               "Precio público", "Descuento %", "Pedido"]
 
 HEADER_FILL = PatternFill("solid", fgColor="1F2937")
 HEADER_FONT = Font(color="FFFFFF", bold=True, size=11)
@@ -817,10 +817,15 @@ def normalize_sheet(ws_out, rows, token, cache, session, opts, orig_images=None)
                       "Mayorista Primera Individual",
                       "Individual Mayorista",        # Crocs
                       "MAYORISTA")                   # Columbia
+    # Columna mayorista GENÉRICA (por unidad de venta): si es la que quedó en
+    # i_may_unit y el ítem es un módulo (pares>1) sin columna de módulo aparte,
+    # ese precio es del MÓDULO → se pasa a por-par dividiendo por pares.
+    i_may_generic = pick(cmap, "Mayorista", "MAYORISTA")
     # Promos: total del MÓDULO ya con descuento (ej. "Mayorista con descuento").
     i_may_desc = pick(cmap, "Mayorista con descuento", "Mayorista con Descuento")
-    # % de descuento (promos).
-    i_desc_pct = pick(cmap, "Descuento", "DESCUENTO", "Descuento %", "% Descuento")
+    # % de descuento (promos). "Accionado (Promo)" (Reebok) suele venir 0-1 (0.4=40%).
+    i_desc_pct = pick(cmap, "Descuento", "DESCUENTO", "Descuento %", "% Descuento",
+                      "Accionado (Promo)", "Accionado")
     # Precio del MÓDULO (total caja, lista): Mayorista + PP.
     i_maypp = pick(cmap, "Mayorista unit. + PP", "Mayorista unit + PP",
                    "Mayorista Primera PP", "Módulo Mayorista")   # Crocs: módulo
@@ -860,8 +865,9 @@ def normalize_sheet(ws_out, rows, token, cache, session, opts, orig_images=None)
 
     # Anchos de columna (la Foto se calibra a PHOTO_COL_PX)
     photo_w = round((PHOTO_COL_PX - 5) / 7, 2)
-    widths = {1: photo_w, 2: 24, 3: 50, 4: 10, 5: 15, 6: 16, 7: 16, 8: 16,
-              9: 11, 10: 11}   # 9=Descuento %, 10=Pedido
+    widths = {1: photo_w, 2: 24, 3: 50, 4: 10, 5: 15, 6: 16, 7: 16, 8: 17,
+              9: 16, 10: 11, 11: 11}
+    # 6=Precio may, 7=May+PP, 8=Mayorista c/dto, 9=Público, 10=Descuento %, 11=Pedido
     for c, w in widths.items():
         ws_out.column_dimensions[get_column_letter(c)].width = w
 
@@ -939,26 +945,30 @@ def normalize_sheet(ws_out, rows, token, cache, session, opts, orig_images=None)
         if pares is None:
             pares = get_pares(sku)                     # fallback: heurístico del SKU
         desc_pct = descuento_pct(g(i_desc_pct))        # % entero o None
+        # --- Precio mayorista = LISTA por par (SIN descuento). ---
+        may = _to_num(g(i_may_unit))
+        # Prepack: si la col mayorista es la genérica y el ítem es módulo sin
+        # columna de módulo aparte, ese precio es del MÓDULO → pasar a por par.
+        if (may is not None and pares and pares != 1
+                and i_maypp is None and i_may_unit == i_may_generic):
+            may = may / pares
+        if may is None:                                # sólo vino el módulo → por par
+            mm = _to_num(g(i_maypp))
+            if mm is not None and pares:
+                may = mm / pares
+        # --- Mayorista con descuento (por par): del origen si vino; si no, se
+        #     computa como mayorista − descuento. ---
         may_desc_mod = _to_num(g(i_may_desc))          # Reebok: MÓDULO ya descontado
         may_unit_desc = _to_num(g(i_may_unit_desc))    # Kappa: POR PAR ya descontado
-        descuento = None
-        if may_unit_desc is not None:             # promo formato Kappa (por par)
-            may = may_unit_desc
-            descuento = desc_pct
-        elif may_desc_mod is not None:            # promo formato Reebok (módulo → por par)
-            may = may_desc_mod / pares if pares else may_desc_mod
-            descuento = desc_pct
-        else:                                     # stock normal
-            may = _to_num(g(i_may_unit))
-            if may is None:                       # sólo vino el módulo → derivar por par
-                mm = _to_num(g(i_maypp))
-                if mm is not None and pares:
-                    may = mm / pares
-            if desc_pct and may is not None:      # promo sin precio ya descontado
-                may = round(may * (1 - desc_pct / 100.0), 2)
-                descuento = desc_pct
-        # Contrato: Mayorista + PP = por-par × pares_por_caja (=may si pares==1).
-        # SIEMPRE computado (no se confía en la columna de módulo del origen).
+        may_desc = None
+        if may_unit_desc is not None:
+            may_desc = may_unit_desc
+        elif may_desc_mod is not None:
+            may_desc = may_desc_mod / pares if pares else may_desc_mod
+        elif desc_pct and may is not None:             # solo % → mayorista − dto
+            may_desc = round(may * (1 - desc_pct / 100.0), 2)
+        descuento = desc_pct if (desc_pct or may_desc is not None) else None
+        # Mayorista + PP = por-par (lista) × pares_por_caja (=may si pares==1).
         maypp = None
         if may is not None:
             maypp = round(may * pares, 2) if (pares and pares != 1) else may
@@ -973,26 +983,28 @@ def normalize_sheet(ws_out, rows, token, cache, session, opts, orig_images=None)
         ws_out.cell(row=out_row, column=5, value=disp_value(disp))  # numérico
         cmay = ws_out.cell(row=out_row, column=6, value=may)
         cmaypp = ws_out.cell(row=out_row, column=7, value=maypp)
-        cpub = ws_out.cell(row=out_row, column=8, value=pub)
-        cdesc = ws_out.cell(row=out_row, column=9, value=descuento)
+        cmaydesc = ws_out.cell(row=out_row, column=8, value=may_desc)
+        cpub = ws_out.cell(row=out_row, column=9, value=pub)
+        cdesc = ws_out.cell(row=out_row, column=10, value=descuento)
         if descuento is not None:
             cdesc.number_format = '0"%"'
         cdesc.alignment = Alignment(horizontal="center", vertical="center")
         c_sku.font = SKU_FONT
-        for cell, val in ((cmay, may), (cmaypp, maypp), (cpub, pub)):
+        for cell, val in ((cmay, may), (cmaypp, maypp), (cmaydesc, may_desc),
+                          (cpub, pub)):
             cell.font = PRICE_FONT
             if isinstance(val, (int, float)):
                 cell.number_format = MONEY_FMT
-        # Pedido (col 10): a completar, salvo que se arrastre lo manual (sync).
+        # Pedido (col 11): a completar, salvo que se arrastre lo manual (sync).
         carry = getattr(opts, "carry", None)
         ped = carry.get(str(sku).strip()) if carry and sku is not None else None
-        ws_out.cell(row=out_row, column=10, value=ped)
+        ws_out.cell(row=out_row, column=11, value=ped)
 
         band = BAND_FILL if (out_row % 2 == 0) else None
-        for c in range(1, 11):
+        for c in range(1, 12):
             cell = ws_out.cell(row=out_row, column=c)
             cell.border = BORDER
-            if c == 10:
+            if c == 11:
                 cell.fill = PEDIDO_FILL        # columna Pedido siempre resaltada
             elif band is not None:
                 cell.fill = band
