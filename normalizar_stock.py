@@ -964,7 +964,17 @@ def normalize_sheet(ws_out, rows, token, cache, session, opts, orig_images=None)
         if may_unit_desc is not None:
             may_desc = may_unit_desc
         elif may_desc_mod is not None:
-            may_desc = may_desc_mod / pares if pares else may_desc_mod
+            # "Mayorista con descuento" puede venir POR PAR (Kappa) o del MÓDULO
+            # (Reebok). Se decide con el % de descuento: se compara el valor tal
+            # cual vs dividido por pares contra el esperado may×(1−dto) y se toma
+            # el más cercano. Sin % (o pares=1) se usa tal cual.
+            if may is not None and desc_pct and pares and pares != 1:
+                target = may * (1 - desc_pct / 100.0)
+                per_par, from_mod = may_desc_mod, may_desc_mod / pares
+                may_desc = (per_par if abs(per_par - target) <= abs(from_mod - target)
+                            else from_mod)
+            else:
+                may_desc = may_desc_mod
         elif desc_pct and may is not None:             # solo % → mayorista − dto
             may_desc = round(may * (1 - desc_pct / 100.0), 2)
         descuento = desc_pct if (desc_pct or may_desc is not None) else None
