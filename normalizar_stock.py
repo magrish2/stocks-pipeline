@@ -1062,7 +1062,16 @@ def normalize_sheet(ws_out, rows, token, cache, session, opts, orig_images=None)
                 want_img = (opts.image_mode == "embed") or first_of_model
                 if want_img:
                     img_path = None
-                    if getattr(opts, "online", True):
+                    # Corrección manual (image_overrides.json): prioridad sobre
+                    # todo, incluso en modo offline (Kappa usa foto embebida).
+                    ov = image_overrides().get(model_key)
+                    if ov:
+                        ovdest = os.path.join(
+                            IMG_CACHE_DIR,
+                            re.sub(r"[^A-Za-z0-9_-]", "_", model_key) + ".jpg")
+                        if download_thumb(ov, ovdest, session) or os.path.exists(ovdest):
+                            img_path = ovdest
+                    if img_path is None and getattr(opts, "online", True):
                         color_es = sku_color_es(desc, sintalle)
                         img_path = resolve_model_image(
                             model_key, model_code, query, cache, session,
