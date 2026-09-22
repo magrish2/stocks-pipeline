@@ -77,6 +77,14 @@ IMG_CACHE_DIR = os.path.join(BASE_DIR, ".cache_img")
 # adivinada del CDN (para modelos donde el nombre "limpio" trae otra foto).
 IMG_OVERRIDES_PATH = os.path.join(BASE_DIR, "image_overrides.json")
 
+# Banco local de fotos de alta calidad, nombradas "<MODELO-COLOR>-<N>.jpg"
+# (varias por artículo; la -1 es la de costado). Si existe la foto del
+# modelo-color en el banco, se usa con prioridad sobre CDN/embebida. Se puede
+# apuntar a otra ruta con la variable de entorno IMG_BANK_DIR.
+IMG_BANK_DIR = os.environ.get("IMG_BANK_DIR") or os.path.join(
+    BASE_DIR, "Datos", "Banco de Imagenes - Fotoproducto")
+_BANK_INDEX = None
+
 # Endpoints de MercadoLibre Argentina
 # Nota: el endpoint de items /sites/MLA/search está restringido (403 incluso con
 # token válido). Usamos la API de catálogo de productos, que sí responde.
@@ -699,6 +707,37 @@ def image_overrides():
     return _OVERRIDES
 
 
+def bank_image(model_key):
+    """Ruta a la foto del banco local para un modelo-color, o None.
+
+    El banco (IMG_BANK_DIR) tiene archivos "<MODELO-COLOR>-<N>.jpg"; se prefiere
+    la -1 (foto de costado) y, si falta, la de menor número. El índice se arma
+    una sola vez."""
+    global _BANK_INDEX
+    if _BANK_INDEX is None:
+        _BANK_INDEX = {}
+        if os.path.isdir(IMG_BANK_DIR):
+            rx = re.compile(r"^(.*)-(\d+)\.(?:jpe?g|png)$", re.I)
+            for f in os.listdir(IMG_BANK_DIR):
+                base, ext = os.path.splitext(f)
+                if ext.lower() not in (".jpg", ".jpeg", ".png"):
+                    continue
+                if base.upper().endswith("-COLOR"):     # swatch de color, no foto
+                    continue
+                m = rx.match(f)
+                if m:                                    # "<clave>-<N>.jpg"
+                    k, n = m.group(1).upper(), int(m.group(2))
+                else:                                    # "<clave>.jpg" (jibbitz)
+                    k, n = base.upper(), 999
+                cur = _BANK_INDEX.get(k)
+                if cur is None or n < cur[0]:
+                    _BANK_INDEX[k] = (n, os.path.join(IMG_BANK_DIR, f))
+    if not model_key:
+        return None
+    hit = _BANK_INDEX.get(str(model_key).strip().upper())
+    return hit[1] if hit else None
+
+
 def resolve_model_image(modelo_key, model_code, query, cache, session,
                         token=None, color_es=None, source="both"):
     """
@@ -1071,6 +1110,9 @@ def normalize_sheet(ws_out, rows, token, cache, session, opts, orig_images=None)
                             re.sub(r"[^A-Za-z0-9_-]", "_", model_key) + ".jpg")
                         if download_thumb(ov, ovdest, session) or os.path.exists(ovdest):
                             img_path = ovdest
+                    # Banco local de alta calidad (Crocs): por modelo-color.
+                    if img_path is None:
+                        img_path = bank_image(model_key)
                     if img_path is None and getattr(opts, "online", True):
                         color_es = sku_color_es(desc, sintalle)
                         img_path = resolve_model_image(
