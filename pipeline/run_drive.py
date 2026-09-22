@@ -27,6 +27,31 @@ CONFIG = os.path.join(BASE, "config.json")
 RAW_EXT = (".xlsx", ".xlsb")
 
 
+def ensure_bank(cfg, svc, crudos_dir):
+    """Monta el banco de fotos hi-q (Crocs) si está en Drive.
+
+    Baja el zip de `cfg['banco_zip']`, lo descomprime y apunta IMG_BANK_DIR a la
+    carpeta con las imágenes. Solo lo hace si hay algún crudo Crocs (evita bajar
+    ~300 MB en corridas sin Crocs). El normalizador lee IMG_BANK_DIR al vuelo."""
+    import zipfile
+    import match
+    zid = cfg.get("banco_zip")
+    if not zid:
+        return
+    if not any(match.key_for(f).startswith("crocs") for f in os.listdir(crudos_dir)):
+        return
+    zpath = os.path.join(tempfile.mkdtemp(prefix="bankzip_"), "banco.zip")
+    drive.download(svc, zid, zpath)
+    dest = tempfile.mkdtemp(prefix="bankimg_")
+    with zipfile.ZipFile(zpath) as z:
+        z.extractall(dest)
+    for root, _dirs, files in os.walk(dest):
+        if sum(1 for fn in files if fn.lower().endswith((".jpg", ".jpeg", ".png"))) > 10:
+            os.environ["IMG_BANK_DIR"] = root
+            print(f"Banco de imágenes montado: {root} ({len(files)} archivos)")
+            return
+
+
 def main(keep_crudos=False):
     cfg = json.load(open(CONFIG))
     svc = drive.service()
@@ -59,6 +84,9 @@ def main(keep_crudos=False):
         if name.lower().endswith(".xlsx") and not name.startswith("~$"):
             drive.download(svc, fid, os.path.join(d_fijos, name), mime)
     print(f"Maestros existentes: {len([f for f in fijos_remote if f[1].lower().endswith('.xlsx')])}")
+
+    # 2.5) montar el banco de fotos hi-q (si hay crudo Crocs)
+    ensure_bank(cfg, svc, d_crudos)
 
     # 3) procesar local
     results = orchestrator.process_folder(d_crudos, d_norm, d_fijos)

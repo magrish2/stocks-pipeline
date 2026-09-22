@@ -715,10 +715,13 @@ def bank_image(model_key):
     una sola vez."""
     global _BANK_INDEX
     if _BANK_INDEX is None:
+        # Se relee del entorno al construir el índice: run_drive puede montar el
+        # banco (bajado de Drive) y setear IMG_BANK_DIR después del import.
+        bank_dir = os.environ.get("IMG_BANK_DIR") or IMG_BANK_DIR
         _BANK_INDEX = {}
-        if os.path.isdir(IMG_BANK_DIR):
+        if os.path.isdir(bank_dir):
             rx = re.compile(r"^(.*)-(\d+)\.(?:jpe?g|png)$", re.I)
-            for f in os.listdir(IMG_BANK_DIR):
+            for f in os.listdir(bank_dir):
                 base, ext = os.path.splitext(f)
                 if ext.lower() not in (".jpg", ".jpeg", ".png"):
                     continue
@@ -731,7 +734,7 @@ def bank_image(model_key):
                     k, n = base.upper(), 999
                 cur = _BANK_INDEX.get(k)
                 if cur is None or n < cur[0]:
-                    _BANK_INDEX[k] = (n, os.path.join(IMG_BANK_DIR, f))
+                    _BANK_INDEX[k] = (n, os.path.join(bank_dir, f))
     if not model_key:
         return None
     hit = _BANK_INDEX.get(str(model_key).strip().upper())
