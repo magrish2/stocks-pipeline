@@ -29,8 +29,18 @@ def key_for(filename):
     else:
         marca = "otro"
 
+    # % de promo (si aparece en el nombre)
+    pct = ("40" if (re.search(r"\b40\b", n) or "40%" in n or "40 %" in n)
+           else "30" if (re.search(r"\b30\b", n) or "30%" in n or "30 %" in n)
+           else "50" if (re.search(r"\b50\b", n) or "50%" in n or "50 %" in n)
+           else None)
+
     # Tipo (orden = prioridad)
-    if "postdatado" in n:
+    if "indumentaria" in n and pct:
+        # Promos de INDUMENTARIA van a su propio maestro (no se mezclan con el
+        # calzado del mismo %, y captan el 30% que antes caía en "general").
+        tipo = f"promo_{pct}_indumentaria"
+    elif "postdatado" in n:
         tipo = "postdatado"
     elif "3 x 1" in n or "3x1" in n:
         tipo = "promo_3x1"
