@@ -1106,7 +1106,11 @@ def normalize_sheet(ws_out, rows, token, cache, session, opts, orig_images=None)
                     img_path = None
                     # Corrección manual (image_overrides.json): prioridad sobre
                     # todo, incluso en modo offline (Kappa usa foto embebida).
-                    ov = image_overrides().get(model_key)
+                    # Un override con valor VACÍO (""/null) significa "sin foto":
+                    # se saltea CDN, banco y embebida (deja la celda vacía).
+                    _ovr = image_overrides()
+                    ov = _ovr.get(model_key)
+                    skip_image = (model_key in _ovr and not ov)
                     if ov:
                         ovdest = os.path.join(
                             IMG_CACHE_DIR,
@@ -1114,16 +1118,16 @@ def normalize_sheet(ws_out, rows, token, cache, session, opts, orig_images=None)
                         if download_thumb(ov, ovdest, session) or os.path.exists(ovdest):
                             img_path = ovdest
                     # Banco local de alta calidad (Crocs): por modelo-color.
-                    if img_path is None:
+                    if img_path is None and not skip_image:
                         img_path = bank_image(model_key)
-                    if img_path is None and getattr(opts, "online", True):
+                    if img_path is None and not skip_image and getattr(opts, "online", True):
                         color_es = sku_color_es(desc, sintalle)
                         img_path = resolve_model_image(
                             model_key, model_code, query, cache, session,
                             token=token, color_es=color_es, source=opts.source)
                     # Fallback (y única fuente si online=False): la imagen que ya
                     # traía el archivo original en esa fila.
-                    if not img_path and orig_images and orig_idx in orig_images:
+                    if not img_path and not skip_image and orig_images and orig_idx in orig_images:
                         ext, blob = orig_images[orig_idx]
                         op = os.path.join(
                             IMG_CACHE_DIR, f"orig_{ws_out.title}_{orig_idx}.{ext}")
