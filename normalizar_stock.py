@@ -1135,8 +1135,14 @@ def normalize_sheet(ws_out, rows, token, cache, session, opts, orig_images=None)
                     # (WMF/EMF sin loader) — si no, revientan recién en out_wb.save().
                     if not img_path and not skip_image and orig_images and orig_idx in orig_images:
                         ext, blob = orig_images[orig_idx]
-                        op = os.path.join(
-                            IMG_CACHE_DIR, f"orig_{ws_out.title}_{orig_idx}.jpg")
+                        # Clave por HASH del contenido (no por hoja+fila): así la
+                        # foto embebida nunca colisiona entre archivos que comparten
+                        # nombre de hoja (CALZADO/INDUMENTARIA en Reebok/Columbia/
+                        # Kappa) — eso hacía que una fila agarrara la embebida de
+                        # OTRO archivo cacheada con la misma hoja+fila.
+                        import hashlib
+                        _h = hashlib.md5(blob).hexdigest()[:16]
+                        op = os.path.join(IMG_CACHE_DIR, f"orig_{_h}.jpg")
                         if os.path.exists(op):
                             img_path = op
                         elif PILImage is not None:
@@ -1155,8 +1161,7 @@ def normalize_sheet(ws_out, rows, token, cache, session, opts, orig_images=None)
                             except Exception:
                                 img_path = None       # formato no soportado → sin foto
                         elif str(ext).lower() not in ("wmf", "emf"):
-                            op = os.path.join(
-                                IMG_CACHE_DIR, f"orig_{ws_out.title}_{orig_idx}.{ext}")
+                            op = os.path.join(IMG_CACHE_DIR, f"orig_{_h}.{ext}")
                             with open(op, "wb") as fh:
                                 fh.write(blob)
                             img_path = op
