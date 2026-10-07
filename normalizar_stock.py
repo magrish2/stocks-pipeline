@@ -674,6 +674,11 @@ def download_thumb(url, dest_path, session):
         return False
 
 
+class TransientImageError(Exception):
+    """El CDN no pudo ser consultado (red caída): el resultado es desconocido,
+    NO un 'no existe'. Sirve para no cachear un miss falso."""
+
+
 def reebok_image_url(model_code, session):
     """
     Devuelve la URL de la foto oficial en reebok.com.ar para un modelo, o None.
@@ -681,15 +686,25 @@ def reebok_image_url(model_code, session):
     """
     if not model_code:
         return None
+    saw_response = False          # ¿el CDN llegó a contestar alguna vez?
     for suf in REEBOK_IMG_SUFFIXES:
         url = REEBOK_CDN.format(name=str(model_code).strip() + suf)
-        try:
-            r = session.head(url, timeout=12, allow_redirects=True)
-        except requests.RequestException:
-            continue
-        if r.status_code == 200 and r.headers.get("content-type", "").startswith("image"):
-            return url
-    return None
+        for attempt in range(3):          # reintenta cortes transitorios (SSL/timeout)
+            try:
+                r = session.head(url, timeout=12, allow_redirects=True)
+            except requests.RequestException:
+                time.sleep(0.4 * (attempt + 1))
+                continue
+            saw_response = True
+            if r.status_code == 200 and r.headers.get("content-type", "").startswith("image"):
+                return url            # existe tal cual ese SKU-color → usar CDN
+            break                     # respuesta definitiva (404/redirect) → próximo sufijo
+    if not saw_response:
+        # El CDN nunca contestó (red caída): NO es un "no está" real. Se avisa
+        # para no cachear un miss falso (si no, el modelo quedaría pegado a
+        # "sin CDN" para siempre aunque la foto exista).
+        raise TransientImageError(model_code)
+    return None                       # el CDN contestó y no está → caer a embebida
 
 
 _OVERRIDES = None
@@ -772,10 +787,15 @@ def resolve_model_image(modelo_key, model_code, query, cache, session,
     url = None
     if source in ("reebok", "both"):
         # Hook por marca (ej. Crocs multi-fuente); si no, CDN adivinado.
-        if IMAGE_URL_FINDER is not None:
-            url = IMAGE_URL_FINDER(model_code, session)
-        else:
-            url = reebok_image_url(model_code, session)
+        try:
+            if IMAGE_URL_FINDER is not None:
+                url = IMAGE_URL_FINDER(model_code, session)
+            else:
+                url = reebok_image_url(model_code, session)
+        except TransientImageError:
+            # El CDN no contestó: devolver sin foto ESTA vez, pero NO cachear el
+            # miss, así la próxima corrida reintenta y usa el CDN si está.
+            return None
     if not url and source in ("meli", "both") and token:
         meli_url = meli_search_thumb(token, query, session, color_es=color_es)
         url = upgrade_url(meli_url) if meli_url else None
