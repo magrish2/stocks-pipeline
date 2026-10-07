@@ -6,12 +6,35 @@ La primera vez abre el navegador para autorizar y guarda token.json.
 """
 import io
 import os
+import random
+import time
 
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
+from googleapiclient.errors import HttpError
 from googleapiclient.http import MediaFileUpload, MediaIoBaseDownload
+
+
+def _retry(fn, tries=6, base=2.0):
+    """Ejecuta fn() reintentando ante cortes transitorios de red/SSL (el
+    SSLEOFError que corta las subidas grandes a Drive desde GitHub Actions) o
+    errores 5xx/429. Backoff exponencial con jitter. Los 4xx no se reintentan."""
+    last = None
+    for i in range(tries):
+        try:
+            return fn()
+        except HttpError as e:
+            status = getattr(getattr(e, "resp", None), "status", None)
+            if status and int(status) < 500 and int(status) != 429:
+                raise                       # error permanente (4xx) → no reintentar
+            last = e
+        except OSError as e:                # ssl.SSLError/EOF, ConnectionError, etc.
+            last = e
+        if i == tries - 1:
+            raise last
+        time.sleep(min(30.0, base * (2 ** i)) + random.uniform(0, 1))
 
 BASE = os.path.dirname(os.path.abspath(__file__))
 SCOPES = ["https://www.googleapis.com/auth/drive"]
@@ -91,16 +114,21 @@ def download(svc, file_id, dest, mime=None):
 
 def upload_new(svc, path, folder_id, mime=XLSX_MIME):
     meta = {"name": os.path.basename(path), "parents": [folder_id]}
-    media = MediaFileUpload(path, mimetype=mime, resumable=True)
-    return svc.files().create(body=meta, media_body=media, fields="id",
-                              supportsAllDrives=True).execute()["id"]
+
+    def _do():
+        media = MediaFileUpload(path, mimetype=mime, resumable=True)
+        return svc.files().create(body=meta, media_body=media, fields="id",
+                                  supportsAllDrives=True).execute()["id"]
+    return _retry(_do)
 
 
 def update_content(svc, file_id, path, mime=XLSX_MIME):
     """Reemplaza el contenido de un archivo existente (mismo id = en su lugar)."""
-    media = MediaFileUpload(path, mimetype=mime, resumable=True)
-    return svc.files().update(fileId=file_id, media_body=media,
-                              supportsAllDrives=True).execute()["id"]
+    def _do():
+        media = MediaFileUpload(path, mimetype=mime, resumable=True)
+        return svc.files().update(fileId=file_id, media_body=media,
+                                  supportsAllDrives=True).execute()["id"]
+    return _retry(_do)
 
 
 def trash(svc, file_id):

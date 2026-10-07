@@ -864,7 +864,9 @@ def normalize_sheet(ws_out, rows, token, cache, session, opts, orig_images=None)
     # ese precio es del MÓDULO → se pasa a por-par dividiendo por pares.
     i_may_generic = pick(cmap, "Mayorista", "MAYORISTA")
     # Promos: total del MÓDULO ya con descuento (ej. "Mayorista con descuento").
-    i_may_desc = pick(cmap, "Mayorista con descuento", "Mayorista con Descuento")
+    i_may_desc = pick(cmap, "Mayorista con descuento", "Mayorista con Descuento",
+                      "Mayorista Desc", "MAYORISTA DESC",   # Columbia promo
+                      "Mayorista Dto", "Mayorista con Dto")
     # % de descuento (promos). "Accionado (Promo)" (Reebok) suele venir 0-1 (0.4=40%).
     i_desc_pct = pick(cmap, "Descuento", "DESCUENTO", "Descuento %", "% Descuento",
                       "Accionado (Promo)", "Accionado")
@@ -1019,6 +1021,11 @@ def normalize_sheet(ws_out, rows, token, cache, session, opts, orig_images=None)
                 may_desc = may_desc_mod
         elif desc_pct and may is not None:             # solo % → mayorista − dto
             may_desc = round(may * (1 - desc_pct / 100.0), 2)
+        # Si vino un precio con descuento pero no el % explícito (Columbia pone
+        # "MAYORISTA DESC" y el 0,4 suelto fuera del encabezado), derivar el %
+        # desde lista vs rebajado. Así el "Descuento %" sale sin clavar nada.
+        if desc_pct is None and may_desc is not None and may and may_desc < may:
+            desc_pct = round((1 - may_desc / may) * 100)
         descuento = desc_pct if (desc_pct or may_desc is not None) else None
         # Mayorista + PP = por-par (lista) × pares_por_caja (=may si pares==1).
         maypp = None
@@ -1117,24 +1124,42 @@ def normalize_sheet(ws_out, rows, token, cache, session, opts, orig_images=None)
                             re.sub(r"[^A-Za-z0-9_-]", "_", model_key) + ".jpg")
                         if download_thumb(ov, ovdest, session) or os.path.exists(ovdest):
                             img_path = ovdest
-                    # Banco local de alta calidad (Crocs): por modelo-color.
-                    if img_path is None and not skip_image:
-                        img_path = bank_image(model_key)
                     if img_path is None and not skip_image and getattr(opts, "online", True):
                         color_es = sku_color_es(desc, sintalle)
                         img_path = resolve_model_image(
                             model_key, model_code, query, cache, session,
                             token=token, color_es=color_es, source=opts.source)
                     # Fallback (y única fuente si online=False): la imagen que ya
-                    # traía el archivo original en esa fila.
+                    # traía el archivo original en esa fila. Se re-codifica a JPEG
+                    # con PIL para descartar formatos que openpyxl NO puede guardar
+                    # (WMF/EMF sin loader) — si no, revientan recién en out_wb.save().
                     if not img_path and not skip_image and orig_images and orig_idx in orig_images:
                         ext, blob = orig_images[orig_idx]
                         op = os.path.join(
-                            IMG_CACHE_DIR, f"orig_{ws_out.title}_{orig_idx}.{ext}")
-                        if not os.path.exists(op):
+                            IMG_CACHE_DIR, f"orig_{ws_out.title}_{orig_idx}.jpg")
+                        if os.path.exists(op):
+                            img_path = op
+                        elif PILImage is not None:
+                            try:
+                                im = PILImage.open(BytesIO(blob))
+                                if im.mode in ("RGBA", "LA", "P"):
+                                    im = im.convert("RGBA")
+                                    bg = PILImage.new("RGB", im.size, (255, 255, 255))
+                                    bg.paste(im, mask=im.split()[-1])
+                                    im = bg
+                                else:
+                                    im = im.convert("RGB")
+                                im.thumbnail((THUMB_PX, THUMB_PX))
+                                im.save(op, "JPEG", quality=THUMB_QUALITY)
+                                img_path = op
+                            except Exception:
+                                img_path = None       # formato no soportado → sin foto
+                        elif str(ext).lower() not in ("wmf", "emf"):
+                            op = os.path.join(
+                                IMG_CACHE_DIR, f"orig_{ws_out.title}_{orig_idx}.{ext}")
                             with open(op, "wb") as fh:
                                 fh.write(blob)
-                        img_path = op
+                            img_path = op
                     if img_path:
                         try:
                             xi = XLImage(img_path)

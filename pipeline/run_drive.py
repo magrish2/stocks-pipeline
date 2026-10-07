@@ -85,9 +85,6 @@ def main(keep_crudos=False):
             drive.download(svc, fid, os.path.join(d_fijos, name), mime)
     print(f"Maestros existentes: {len([f for f in fijos_remote if f[1].lower().endswith('.xlsx')])}")
 
-    # 2.5) montar el banco de fotos hi-q (si hay crudo Crocs)
-    ensure_bank(cfg, svc, d_crudos)
-
     # 3) procesar local
     results = orchestrator.process_folder(d_crudos, d_norm, d_fijos)
 
