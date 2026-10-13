@@ -9,22 +9,27 @@
     <key>ProgramArguments</key>
     <array>
         <string>/Users/ginomagris/Desktop/Stocks DISTRINANDO/.venv/bin/python</string>
-        <string>/Users/ginomagris/Desktop/Stocks DISTRINANDO/pipeline/watch.py</string>
+        <string>/Users/ginomagris/Desktop/Stocks DISTRINANDO/pipeline/watch_local.py</string>
     </array>
 
     <key>WorkingDirectory</key>
     <string>/Users/ginomagris/Desktop/Stocks DISTRINANDO</string>
 
-    <!-- Cada 300 s (5 min). Subilo/bajalo a gusto. -->
-    <key>StartInterval</key>
-    <integer>300</integer>
+    <!-- Watcher siempre vivo: sondea la carpeta local y procesa al instante.
+         KeepAlive lo relanza si se cae; RunAtLoad lo arranca al prender la Mac. -->
+    <key>KeepAlive</key>
+    <true/>
 
     <key>RunAtLoad</key>
     <true/>
 
+    <!-- Los logs van a ~/Library/Logs (NO a ~/Desktop): macOS protege Desktop
+         por TCC y launchd no puede abrir ahí sus archivos de redirección
+         (falla con EX_CONFIG 78 antes de arrancar). watch.py igual sigue
+         escribiendo su propio pipeline/watch.log una vez que arranca. -->
     <key>StandardOutPath</key>
-    <string>/Users/ginomagris/Desktop/Stocks DISTRINANDO/pipeline/watch.out.log</string>
+    <string>/Users/ginomagris/Library/Logs/stocks-pipeline.out.log</string>
     <key>StandardErrorPath</key>
-    <string>/Users/ginomagris/Desktop/Stocks DISTRINANDO/pipeline/watch.err.log</string>
+    <string>/Users/ginomagris/Library/Logs/stocks-pipeline.err.log</string>
 </dict>
 </plist>

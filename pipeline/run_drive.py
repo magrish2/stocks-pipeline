@@ -52,15 +52,63 @@ def ensure_bank(cfg, svc, crudos_dir):
             return
 
 
+def process_and_upload(cfg, svc, d_crudos, local_norm_dir=None):
+    """Procesa los crudos que YA están en la carpeta local `d_crudos`: baja los
+    maestros de FIJOS, normaliza, y sube normalizados + maestros a Drive.
+    Devuelve (results, d_norm). No toca los crudos (el caller decide).
+    Lo usan tanto main() (crudos bajados de Drive) como el watcher local."""
+    work = tempfile.mkdtemp(prefix="pipe_")
+    d_norm = os.path.join(work, "norm")
+    d_fijos = os.path.join(work, "fijos")
+    for d in (d_norm, d_fijos):
+        os.makedirs(d, exist_ok=True)
+
+    # bajar maestros actuales de FIJOS
+    fijos_remote = drive.list_files(svc, cfg["fijos"])
+    for fid, name, mime in fijos_remote:
+        if name.lower().endswith(".xlsx") and not name.startswith("~$"):
+            drive.download(svc, fid, os.path.join(d_fijos, name), mime)
+    print(f"Maestros existentes: {len([f for f in fijos_remote if f[1].lower().endswith('.xlsx')])}")
+
+    # procesar local
+    results = orchestrator.process_folder(d_crudos, d_norm, d_fijos)
+
+    # subir normalizados a una subcarpeta por MARCA (Reebok/Kappa/Crocs)
+    BRAND_DIR = {"reebok": "Reebok", "kappa": "Kappa", "crocs": "Crocs",
+                 "columbia": "Columbia"}
+    brand_folders = {}          # marca -> folderId (cache)
+    brand_listing = {}          # folderId -> archivos (para upsert)
+    for r in results:
+        norm_path = os.path.join(d_norm, r["norm"])
+        if not os.path.exists(norm_path):
+            continue
+        carpeta = "Pendientes" if r.get("pendiente") else BRAND_DIR.get(r["brand"], "Otros")
+        if carpeta not in brand_folders:
+            fid = drive.get_or_create_folder(svc, cfg["normalizados"], carpeta)
+            brand_folders[carpeta] = fid
+            brand_listing[fid] = drive.list_files(svc, fid)
+        fid = brand_folders[carpeta]
+        _id, nuevo = drive.upsert_by_name(svc, norm_path, fid, brand_listing[fid])
+        print(f"  norm -> {carpeta}/{r['norm']} ({'nuevo' if nuevo else 'reemplazado'})")
+        if local_norm_dir:                          # copia local opcional
+            os.makedirs(local_norm_dir, exist_ok=True)
+            import shutil
+            shutil.copy2(norm_path, os.path.join(local_norm_dir, r["norm"]))
+
+    # subir/actualizar maestros en su lugar (se relee FIJOS ahora, no el viejo).
+    fijos_now = drive.list_files(svc, cfg["fijos"])
+    for f in sorted(os.listdir(d_fijos)):
+        if f.lower().endswith(".xlsx") and not f.startswith("~$"):
+            _id, nuevo = drive.upsert_by_name(svc, os.path.join(d_fijos, f),
+                                              cfg["fijos"], fijos_now)
+            print(f"  maestro {'creado' if nuevo else 'actualizado en su lugar'}: {f}")
+    return results, d_norm
+
+
 def main(keep_crudos=False):
     cfg = json.load(open(CONFIG))
     svc = drive.service()
-    work = tempfile.mkdtemp(prefix="pipe_")
-    d_crudos = os.path.join(work, "crudos")
-    d_norm = os.path.join(work, "norm")
-    d_fijos = os.path.join(work, "fijos")
-    for d in (d_crudos, d_norm, d_fijos):
-        os.makedirs(d, exist_ok=True)
+    d_crudos = tempfile.mkdtemp(prefix="crudos_")
 
     # 1) bajar crudos (guardando su id para poder eliminarlos al final)
     crudos = drive.list_files(svc, cfg["crudos"])
@@ -78,44 +126,9 @@ def main(keep_crudos=False):
         print("No hay crudos para procesar.")
         return
 
-    # 2) bajar maestros actuales de FIJOS
-    fijos_remote = drive.list_files(svc, cfg["fijos"])
-    for fid, name, mime in fijos_remote:
-        if name.lower().endswith(".xlsx") and not name.startswith("~$"):
-            drive.download(svc, fid, os.path.join(d_fijos, name), mime)
-    print(f"Maestros existentes: {len([f for f in fijos_remote if f[1].lower().endswith('.xlsx')])}")
+    process_and_upload(cfg, svc, d_crudos)
 
-    # 3) procesar local
-    results = orchestrator.process_folder(d_crudos, d_norm, d_fijos)
-
-    # 4) subir normalizados a una subcarpeta por MARCA (Reebok/Kappa/Crocs)
-    BRAND_DIR = {"reebok": "Reebok", "kappa": "Kappa", "crocs": "Crocs",
-                 "columbia": "Columbia"}
-    brand_folders = {}          # marca -> folderId (cache)
-    brand_listing = {}          # folderId -> archivos (para upsert)
-    for r in results:
-        norm_path = os.path.join(d_norm, r["norm"])
-        if not os.path.exists(norm_path):
-            continue
-        carpeta = "Pendientes" if r.get("pendiente") else BRAND_DIR.get(r["brand"], "Otros")
-        if carpeta not in brand_folders:
-            fid = drive.get_or_create_folder(svc, cfg["normalizados"], carpeta)
-            brand_folders[carpeta] = fid
-            brand_listing[fid] = drive.list_files(svc, fid)
-        fid = brand_folders[carpeta]
-        _id, nuevo = drive.upsert_by_name(svc, norm_path, fid, brand_listing[fid])
-        print(f"  norm -> {carpeta}/{r['norm']} ({'nuevo' if nuevo else 'reemplazado'})")
-
-    # 5) subir/actualizar maestros en su lugar. Se relee FIJOS ahora (no el
-    #    listado viejo del paso 2) para no crear duplicados si algo cambió.
-    fijos_now = drive.list_files(svc, cfg["fijos"])
-    for f in sorted(os.listdir(d_fijos)):
-        if f.lower().endswith(".xlsx") and not f.startswith("~$"):
-            _id, nuevo = drive.upsert_by_name(svc, os.path.join(d_fijos, f),
-                                              cfg["fijos"], fijos_now)
-            print(f"  maestro {'creado' if nuevo else 'actualizado en su lugar'}: {f}")
-
-    # 6) recién ahora (todo subido OK) mandar los crudos a la Papelera
+    # recién ahora (todo subido OK) mandar los crudos a la Papelera
     if keep_crudos:
         print("\n(--keep) Los crudos se dejan en su carpeta.")
     else:

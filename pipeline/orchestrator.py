@@ -43,6 +43,24 @@ def _find_master(fijos_dir, key):
     return None
 
 
+def _blank_pedido(path):
+    """Vacía la columna 'Pedido' de todas las hojas (el NORMALIZADO sale sin
+    Pedido; el maestro sí lo conserva). Se usa al derivar el NORMALIZADO del
+    maestro con una copia, para no re-normalizar el crudo una segunda vez."""
+    import openpyxl
+    wb = openpyxl.load_workbook(path)
+    for ws in wb.worksheets:
+        pcol = None
+        for c in range(1, (ws.max_column or 1) + 1):
+            if str(ws.cell(1, c).value or "").strip().lower() == "pedido":
+                pcol = c
+                break
+        if pcol:
+            for r in range(2, (ws.max_row or 1) + 1):
+                ws.cell(r, pcol).value = None
+    wb.save(path)
+
+
 def process_raw(raw, normalizados_dir, fijos_dir):
     os.makedirs(normalizados_dir, exist_ok=True)
     os.makedirs(fijos_dir, exist_ok=True)
@@ -58,17 +76,19 @@ def process_raw(raw, normalizados_dir, fijos_dir):
         return {"key": None, "brand": brand, "pendiente": True,
                 "norm": os.path.basename(out), "master": None}
 
-    # 1) Normalizado completo -> NORMALIZADOS
+    # El NORMALIZADO y el maestro son el MISMO contenido salvo la columna Pedido
+    # (el maestro la arrastra). Por eso se normaliza UNA sola vez (al maestro) y
+    # el NORMALIZADO se deriva copiando + vaciando Pedido — antes se normalizaba
+    # el crudo dos veces (reparseo del .xlsb + re-embebido de fotos duplicados).
     norm_out = os.path.join(normalizados_dir, base + " NORMALIZADO.xlsx")
-    engine.normalize(raw, norm_out)
-    print(f"  normalizado -> {os.path.basename(norm_out)}")
     norm_name = os.path.basename(norm_out)
-
-    # 2) Maestro en FIJOS. Regenera desde el crudo; lo que desaparece se borra.
     master = _find_master(fijos_dir, key)
+
     if master is None:
         master_out = os.path.join(fijos_dir, f"MAESTRO {key}.xlsx")
         engine.normalize(raw, master_out)          # incluye los de stock 0
+        shutil.copy2(master_out, norm_out)         # maestro nuevo no tiene Pedido
+        print(f"  normalizado -> {norm_name}")
         print(f"  maestro NUEVO ({key}) -> {os.path.basename(master_out)}")
         return {"key": key, "brand": brand, "norm": norm_name,
                 "master": master_out, "created": True}
@@ -78,9 +98,12 @@ def process_raw(raw, normalizados_dir, fijos_dir):
     carry = sync.read_pedido_map(master)
     tmp = tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False).name
     shutil.copy2(master, tmp)                      # copia del maestro viejo (para el diff)
-    engine.normalize(raw, master, carry=carry)     # solo lo presente en el crudo
+    engine.normalize(raw, master, carry=carry)     # UNA sola normalización
     d = sync.diff(tmp, master)
     os.remove(tmp)
+    shutil.copy2(master, norm_out)                 # NORMALIZADO = maestro...
+    _blank_pedido(norm_out)                         # ...pero con Pedido en blanco
+    print(f"  normalizado -> {norm_name}")
     print(f"  maestro ACTUALIZADO ({key}): +{len(d['altas'])} altas, "
           f"{len(d['bajas'])} borrados (desaparecidos del crudo), "
           f"~{len(d['cambios'])} cambios de cantidad "
