@@ -118,8 +118,18 @@ def process_folder(crudos_dir, normalizados_dir, fijos_dir):
     print(f"Crudos: {len(raws)}")
     results = []
     for raw in raws:
-        print(f"\n## {os.path.basename(raw)}  [{match.key_for(raw)}]")
-        results.append(process_raw(raw, normalizados_dir, fijos_dir))
+        name = os.path.basename(raw)
+        print(f"\n## {name}  [{match.key_for(raw)}]")
+        try:
+            r = process_raw(raw, normalizados_dir, fijos_dir)
+            r["raw"] = name
+        except Exception as e:
+            import traceback
+            # Un crudo roto NO frena la tanda: se marca y se sigue con el resto.
+            print(f"  [!] ERROR en {name}: {e}")
+            r = {"raw": name, "error": f"{type(e).__name__}: {e}",
+                 "trace": traceback.format_exc()}
+        results.append(r)
     return results
 
 

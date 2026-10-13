@@ -79,6 +79,8 @@ def process_and_upload(cfg, svc, d_crudos, local_norm_dir=None):
     brand_folders = {}          # marca -> folderId (cache)
     brand_listing = {}          # folderId -> archivos (para upsert)
     for r in results:
+        if not r.get("norm"):              # crudo que falló: no se sube nada
+            continue
         norm_path = os.path.join(d_norm, r["norm"])
         if not os.path.exists(norm_path):
             continue
