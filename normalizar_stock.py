@@ -103,6 +103,9 @@ MAX_PRODUCT_LOOKUPS = 8
 REEBOK_CDN = "https://reebok.com.ar/cdn/shop/files/{name}?width=690"
 REEBOK_IMG_SUFFIXES = ["-1.jpg", "_1.jpg", "-1.png"]
 
+# Pre-resolución de fotos del CDN en paralelo (acelera el cold-cache). Kill-switch.
+_PARALLEL_PREWARM = True
+
 # Encabezados esperados en la fila de títulos del stock
 HEADER_ROW_HINT = "Número de artículo"
 # Marcadores válidos para ubicar la fila de encabezados (Reebok usa "Número de
@@ -985,6 +988,56 @@ def normalize_sheet(ws_out, rows, token, cache, session, opts, orig_images=None)
                  if any(v is not None for v in r)]
     if opts.limit:
         data_rows = data_rows[: opts.limit]
+
+    # --- Opt: pre-resolver las fotos del CDN EN PARALELO (acelera el cold-cache).
+    # Junta los modelos únicos que van a pedir foto online y los resuelve con
+    # varios hilos (una Session por hilo); el loop de abajo sólo lee del cache en
+    # disco. Es aditivo: si algo falla, el loop resuelve normal. Se acota al CDN
+    # directo (Reebok/Kappa, IMAGE_URL_FINDER=None) para no compartir sesión con
+    # los finders de Crocs/Columbia.
+    if (_PARALLEL_PREWARM and opts.image_mode in ("embed", "first-row")
+            and getattr(opts, "online", True) and IMAGE_URL_FINDER is None):
+        _ovr = image_overrides()
+        uniq = {}
+        for _oi, _row in data_rows:
+            def _gg(idx, _r=_row):
+                return _r[idx] if idx is not None and idx < len(_r) else None
+            _sku = _gg(i_sku); _desc = _gg(i_desc)
+            if _sku is None and _desc is None:
+                continue
+            _mk = str(_gg(i_modelo) or _sku)
+            if _mk in uniq or _mk in _ovr:          # ya visto, u override/skip (va en el loop)
+                continue
+            _mc = _gg(i_modelo)
+            if not _mc and _sku:
+                _mc = re.sub(r"-[^-]+$", "", str(_sku))
+            _sintalle = _gg(i_sintalle)
+            uniq[_mk] = (_mc, build_query(manufacturer_code(_desc), _sintalle, _desc),
+                         sku_color_es(_desc, _sintalle))
+        if len(uniq) > 1:
+            import concurrent.futures
+            import threading
+            _tls = threading.local()
+
+            def _sess():
+                s = getattr(_tls, "s", None)
+                if s is None:
+                    s = requests.Session()
+                    s.headers.update(session.headers)
+                    _tls.s = s
+                return s
+
+            def _warm(item):
+                mk, (mc, q, ces) = item
+                try:
+                    resolve_model_image(mk, mc, q, cache, _sess(), token=token,
+                                        color_es=ces, source=opts.source)
+                except Exception:
+                    pass
+            with concurrent.futures.ThreadPoolExecutor(max_workers=8) as ex:
+                list(ex.map(_warm, list(uniq.items())))
+            save_json(CACHE_PATH, cache)
+            print(f"    pre-resueltas {len(uniq)} fotos en paralelo", flush=True)
 
     total = len(data_rows)
     for n, (orig_idx, row) in enumerate(data_rows, start=1):
