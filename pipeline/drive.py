@@ -99,17 +99,20 @@ def get_or_create_folder(svc, parent_id, name):
 
 
 def download(svc, file_id, dest, mime=None):
-    """Baja un archivo. Si es Google Sheet, lo exporta a xlsx."""
-    if mime == GSHEET_MIME:
-        req = svc.files().export_media(fileId=file_id, mimeType=XLSX_MIME)
-    else:
-        req = svc.files().get_media(fileId=file_id, supportsAllDrives=True)
-    with io.FileIO(dest, "wb") as fh:
-        dl = MediaIoBaseDownload(fh, req)
-        done = False
-        while not done:
-            _, done = dl.next_chunk()
-    return dest
+    """Baja un archivo (reintenta ante cortes/timeouts de red). Si es Google
+    Sheet, lo exporta a xlsx."""
+    def _do():
+        if mime == GSHEET_MIME:
+            req = svc.files().export_media(fileId=file_id, mimeType=XLSX_MIME)
+        else:
+            req = svc.files().get_media(fileId=file_id, supportsAllDrives=True)
+        with io.FileIO(dest, "wb") as fh:
+            dl = MediaIoBaseDownload(fh, req)
+            done = False
+            while not done:
+                _, done = dl.next_chunk()
+        return dest
+    return _retry(_do)
 
 
 def upload_new(svc, path, folder_id, mime=XLSX_MIME):
